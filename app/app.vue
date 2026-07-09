@@ -10,12 +10,12 @@ useHead({
     { rel: 'icon', href: '/favicon.ico' }
   ],
   htmlAttrs: {
-    lang: 'en'
+    lang: 'pt-BR'
   }
 })
 
 const title = 'TTC LinkedIn Research Score'
-const description = 'A dark, code-forward Nuxt UI surface for checking LinkedIn research scoring signals.'
+const description = 'Aplicativo local para sondar, auditar e ranquear perfis LinkedIn para recrutamento.'
 
 useSeoMeta({
   title,
@@ -34,15 +34,13 @@ useSeoMeta({
         <NuxtLink to="/">
           <AppLogo class="w-auto h-6 shrink-0" />
         </NuxtLink>
-
-        <TemplateMenu />
       </template>
 
       <template #right>
         <UColorModeButton />
 
         <UButton
-          to="https://github.com/nuxt-ui-templates/starter"
+          to="https://github.com/tatitelescampos/ttc-linkedin-research-score"
           target="_blank"
           icon="i-simple-icons-github"
           aria-label="GitHub"
@@ -56,18 +54,18 @@ useSeoMeta({
       <NuxtPage />
     </UMain>
 
-    <USeparator icon="i-simple-icons-nuxtdotjs" />
+    <USeparator icon="i-simple-icons-linkedin" />
 
     <UFooter>
       <template #left>
         <p class="text-sm text-muted">
-          Built with Nuxt UI • © {{ new Date().getFullYear() }}
+          Local-first. Nenhuma chamada paga roda automaticamente.
         </p>
       </template>
 
       <template #right>
         <UButton
-          to="https://github.com/nuxt-ui-templates/starter"
+          to="https://github.com/tatitelescampos/ttc-linkedin-research-score"
           target="_blank"
           icon="i-simple-icons-github"
           aria-label="GitHub"
