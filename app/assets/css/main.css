@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme static {
+  --color-linkedin-50: #eef7ff;
+  --color-linkedin-100: #d9edff;
+  --color-linkedin-200: #bce0ff;
+  --color-linkedin-300: #8dccff;
+  --color-linkedin-400: #56adf4;
+  --color-linkedin-500: #2f8fd8;
+  --color-linkedin-600: #0a66c2;
+  --color-linkedin-700: #0756a4;
+  --color-linkedin-800: #0a467f;
+  --color-linkedin-900: #0d3d6a;
+  --color-linkedin-950: #082642;
+}
+
+:root {
+  --ui-radius: 0.25rem;
+}
+
+body {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ui-primary) 7%, transparent), transparent 18rem),
+    var(--ui-bg);
+}
