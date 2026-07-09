@@ -1,8 +1,8 @@
 export default defineAppConfig({
   ui: {
     colors: {
-      primary: 'linkedin',
-      neutral: 'slate',
+      primary: 'voltage',
+      neutral: 'zinc',
       info: 'sky',
       success: 'emerald',
       warning: 'amber',
@@ -13,7 +13,7 @@ export default defineAppConfig({
     },
     button: {
       slots: {
-        base: 'font-semibold rounded-md'
+        base: 'font-semibold rounded-lg'
       },
       defaultVariants: {
         color: 'primary',
@@ -22,27 +22,27 @@ export default defineAppConfig({
     },
     badge: {
       slots: {
-        base: 'rounded-sm font-medium'
+        base: 'rounded-full font-medium'
       }
     },
     card: {
       slots: {
-        root: 'rounded-lg shadow-sm ring-1 ring-default'
+        root: 'rounded-xl bg-muted shadow-none ring-1 ring-default'
       }
     },
     input: {
       slots: {
-        base: 'rounded-md'
+        base: 'rounded-lg bg-muted'
       }
     },
     select: {
       slots: {
-        base: 'rounded-md'
+        base: 'rounded-lg bg-muted'
       }
     },
     tabs: {
       slots: {
-        trigger: 'rounded-md'
+        trigger: 'rounded-lg'
       }
     },
     table: {

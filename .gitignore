@@ -6,14 +6,11 @@
 .cache
 dist
 
-# Node dependencies and local tooling
+# Node dependencies
 node_modules
 node_modules.broken-*
 .pnpm-store
 .tools
-.agents/skills/*
-!.agents/skills/nuxt-ui/
-!.agents/skills/nuxt-ui/**
 
 # Logs
 logs

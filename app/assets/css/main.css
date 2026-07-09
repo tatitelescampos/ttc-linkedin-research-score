@@ -2,25 +2,50 @@
 @import "@nuxt/ui";
 
 @theme static {
-  --color-linkedin-50: #eef7ff;
-  --color-linkedin-100: #d9edff;
-  --color-linkedin-200: #bce0ff;
-  --color-linkedin-300: #8dccff;
-  --color-linkedin-400: #56adf4;
-  --color-linkedin-500: #2f8fd8;
-  --color-linkedin-600: #0a66c2;
-  --color-linkedin-700: #0756a4;
-  --color-linkedin-800: #0a467f;
-  --color-linkedin-900: #0d3d6a;
-  --color-linkedin-950: #082642;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-voltage-50: #ffffe7;
+  --color-voltage-100: #ffffc2;
+  --color-voltage-200: #ffff88;
+  --color-voltage-300: #faff69;
+  --color-voltage-400: #f0f83c;
+  --color-voltage-500: #d7df18;
+  --color-voltage-600: #adb20f;
+  --color-voltage-700: #818412;
+  --color-voltage-800: #676817;
+  --color-voltage-900: #56561a;
+  --color-voltage-950: #3a3a1f;
 }
 
 :root {
-  --ui-radius: 0.25rem;
+  --ui-radius: 0.5rem;
+  --ui-primary: #faff69;
+  --ui-bg: #0a0a0a;
+  --ui-bg-muted: #121212;
+  --ui-bg-elevated: #1a1a1a;
+  --ui-bg-accented: #242424;
+  --ui-bg-inverted: #faff69;
+  --ui-text: #cccccc;
+  --ui-text-muted: #888888;
+  --ui-text-dimmed: #5a5a5a;
+  --ui-text-toned: #e6e6e6;
+  --ui-text-highlighted: #ffffff;
+  --ui-text-inverted: #0a0a0a;
+  --ui-border: #2a2a2a;
+  --ui-border-muted: #242424;
+  --ui-border-accented: #3a3a3a;
+  --ui-border-inverted: #faff69;
 }
 
 body {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--ui-primary) 7%, transparent), transparent 18rem),
-    var(--ui-bg);
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+}
+
+pre,
+code {
+  font-family: var(--font-mono);
 }
