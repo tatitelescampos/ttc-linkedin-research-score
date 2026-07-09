@@ -1,305 +1,306 @@
 <script setup lang="ts">
-type ProbeCoverageField = { path: string, count: number, examples: string[] }
-type ProbeResult = {
-  ok: boolean
-  status: number
-  actorId: string
-  durationMs: number
-  requested: { query: string, maxResults: number, timeoutSeconds: number }
-  counts: { returnedItems: number, fieldPaths: number }
-  costs: { source: string, availableInPayload: boolean, note: string }
-  coverage: ProbeCoverageField[]
-  payload: unknown
-  error: null | { message: string, status: number }
+type VacancyListItem = {
+  id: number
+  title: string
+  company: string
+  location: string
+  sourceUrl: string | null
+  seniority: string | null
+  sourcingComment: string | null
+  descriptionPreview: string
+  createdAt: string
 }
 
-const query = ref('site:linkedin.com/in operations logistics last mile Sao Paulo')
-const maxResults = ref(3)
-const timeoutSeconds = ref(30)
-const result = ref<ProbeResult | null>(null)
-const pending = ref(false)
-const clientError = ref('')
+const emptyForm = () => ({
+  title: '',
+  company: '',
+  location: '',
+  sourceUrl: '',
+  seniority: '',
+  sourcingComment: '',
+  description: ''
+})
 
-const rawPayload = computed(() => result.value ? JSON.stringify(result.value.payload, null, 2) : '')
-const statusColor = computed(() => !result.value ? 'neutral' : result.value.ok ? 'success' : 'error')
+const form = reactive(emptyForm())
+const search = ref('')
+const createPending = ref(false)
+const createError = ref('')
+const createSuccess = ref('')
 
-const runProbe = async () => {
-  pending.value = true
-  clientError.value = ''
-  result.value = null
+const { data: vacancies, pending: listPending, refresh } = await useFetch<VacancyListItem[]>('/api/vacancies', {
+  query: { search },
+  default: () => []
+})
+
+watch(search, () => refresh())
+
+const resetForm = () => {
+  Object.assign(form, emptyForm())
+}
+
+const createVacancy = async () => {
+  createPending.value = true
+  createError.value = ''
+  createSuccess.value = ''
 
   try {
-    result.value = await $fetch<ProbeResult>('/api/apify/probe', {
+    const vacancy = await $fetch<{ id: number }>('/api/vacancies', {
       method: 'POST',
-      body: { query: query.value, maxResults: maxResults.value, timeoutSeconds: timeoutSeconds.value }
+      body: form
     })
+
+    resetForm()
+    await refresh()
+    createSuccess.value = `Vaga #${vacancy.id} salva com versao inicial.`
   } catch (error) {
-    clientError.value = error instanceof Error ? error.message : 'Nao foi possivel executar a sondagem.'
+    createError.value = error instanceof Error ? error.message : 'Nao foi possivel salvar a vaga.'
   } finally {
-    pending.value = false
+    createPending.value = false
   }
 }
 </script>
 
 <template>
   <UContainer class="py-8 sm:py-10">
-    <div class="grid gap-6 border-b border-default pb-8 xl:grid-cols-[420px_1fr]">
+    <div class="grid gap-6 border-b border-default pb-8 xl:grid-cols-[430px_1fr]">
       <section class="space-y-5">
         <div>
           <UBadge
             color="primary"
             variant="solid"
-            icon="i-lucide-radar"
+            icon="i-lucide-briefcase-business"
             class="text-inverted"
           >
-            Sondagem manual
+            Workspace de vagas
           </UBadge>
           <h1 class="mt-4 text-3xl font-bold leading-tight text-highlighted sm:text-4xl">
-            Probe Apify para descoberta de resposta
+            Criar e navegar vagas
           </h1>
           <p class="mt-3 text-sm leading-6 text-muted">
-            Execute uma busca pequena e deliberada no ator configurado. A credencial fica no servidor e a resposta volta para inspecao antes de qualquer fluxo de vaga existir.
+            Cole uma descricao de vaga, registre os metadados principais e preserve a primeira versao para analise e sourcing futuros.
           </p>
         </div>
 
         <UCard>
           <template #header>
             <div class="flex items-center justify-between gap-3">
-              <span class="text-sm font-semibold text-highlighted">Entrada do teste</span>
+              <span class="text-sm font-semibold text-highlighted">Criar vaga</span>
               <UBadge
-                color="warning"
+                color="neutral"
                 variant="subtle"
               >
-                Manual
+                Texto colado
               </UBadge>
             </div>
           </template>
 
           <form
             class="space-y-5"
-            @submit.prevent="runProbe"
+            @submit.prevent="createVacancy"
           >
             <UFormField
-              label="Consulta pequena"
-              name="query"
-              help="Use uma consulta intencional e curta para reduzir custo."
+              label="Titulo da vaga"
+              name="title"
               required
             >
-              <UTextarea
-                v-model="query"
-                :rows="4"
-                class="w-full"
-                placeholder="Ex.: operations logistics last mile Sao Paulo"
+              <UInput
+                v-model="form.title"
+                icon="i-lucide-briefcase"
+                placeholder="Head, Last Mile Growth & Ops"
               />
             </UFormField>
 
             <div class="grid gap-4 sm:grid-cols-2">
               <UFormField
-                label="Limite de perfis"
-                name="maxResults"
+                label="Empresa"
+                name="company"
+                required
               >
-                <UInputNumber
-                  v-model="maxResults"
-                  :min="1"
-                  :max="5"
-                  class="w-full"
+                <UInput
+                  v-model="form.company"
+                  icon="i-lucide-building-2"
+                  placeholder="Amazon"
                 />
               </UFormField>
+
               <UFormField
-                label="Tempo limite"
-                name="timeoutSeconds"
+                label="Localizacao"
+                name="location"
+                required
               >
-                <UInputNumber
-                  v-model="timeoutSeconds"
-                  :min="5"
-                  :max="60"
-                  class="w-full"
+                <UInput
+                  v-model="form.location"
+                  icon="i-lucide-map-pin"
+                  placeholder="Osasco, Sao Paulo, Brazil"
                 />
               </UFormField>
             </div>
 
+            <div class="grid gap-4 sm:grid-cols-2">
+              <UFormField
+                label="Senioridade"
+                name="seniority"
+              >
+                <UInput
+                  v-model="form.seniority"
+                  icon="i-lucide-chart-no-axes-combined"
+                  placeholder="Head, Director, Manager..."
+                />
+              </UFormField>
+
+              <UFormField
+                label="URL da vaga"
+                name="sourceUrl"
+              >
+                <UInput
+                  v-model="form.sourceUrl"
+                  icon="i-lucide-link"
+                  placeholder="https://..."
+                />
+              </UFormField>
+            </div>
+
+            <UFormField
+              label="Comentario de sourcing"
+              name="sourcingComment"
+            >
+              <UInput
+                v-model="form.sourcingComment"
+                icon="i-lucide-message-square-text"
+                placeholder="Contexto opcional para a busca"
+              />
+            </UFormField>
+
+            <UFormField
+              label="Descricao original"
+              name="description"
+              help="Esta primeira versao fica preservada para auditoria."
+              required
+            >
+              <UTextarea
+                v-model="form.description"
+                :rows="10"
+                class="w-full"
+                placeholder="Cole a descricao completa da vaga..."
+              />
+            </UFormField>
+
             <UAlert
-              v-if="clientError"
+              v-if="createError"
               color="error"
               variant="subtle"
               icon="i-lucide-circle-alert"
-              title="Falha na sondagem"
-              :description="clientError"
+              title="Nao foi possivel salvar"
+              :description="createError"
             />
+            <UAlert
+              v-if="createSuccess"
+              color="success"
+              variant="subtle"
+              icon="i-lucide-check-circle"
+              title="Vaga salva"
+              :description="createSuccess"
+            />
+
             <UButton
               type="submit"
-              icon="i-lucide-play"
-              :loading="pending"
+              icon="i-lucide-save"
+              :loading="createPending"
               class="text-inverted"
               block
             >
-              Executar chamada Apify
+              Salvar vaga
             </UButton>
           </form>
         </UCard>
       </section>
 
       <section class="space-y-4">
-        <div class="grid gap-4 md:grid-cols-4">
-          <UCard>
-            <p class="text-xs font-semibold uppercase tracking-normal text-muted">
-              Status
-            </p>
-            <UBadge
-              class="mt-3"
-              :color="statusColor"
-              variant="subtle"
-            >
-              {{ result ? (result.ok ? 'Sucesso' : 'Falha') : 'Aguardando' }}
-            </UBadge>
-          </UCard>
-          <UCard>
-            <p class="text-xs font-semibold uppercase tracking-normal text-muted">
-              Itens
-            </p>
-            <p class="mt-2 text-3xl font-semibold text-highlighted">
-              {{ result?.counts.returnedItems ?? 0 }}
-            </p>
-          </UCard>
-          <UCard>
-            <p class="text-xs font-semibold uppercase tracking-normal text-muted">
-              Campos
-            </p>
-            <p class="mt-2 text-3xl font-semibold text-highlighted">
-              {{ result?.counts.fieldPaths ?? 0 }}
-            </p>
-          </UCard>
-          <UCard>
-            <p class="text-xs font-semibold uppercase tracking-normal text-muted">
-              Duracao
-            </p>
-            <p class="mt-2 text-3xl font-semibold text-highlighted">
-              {{ result ? `${result.durationMs}ms` : '-' }}
-            </p>
-          </UCard>
-        </div>
-
-        <UAlert
-          v-if="result?.error"
-          color="error"
-          variant="subtle"
-          icon="i-lucide-triangle-alert"
-          title="Resposta de erro"
-          :description="result.error.message"
-        />
-
         <UCard>
           <template #header>
             <div class="flex flex-wrap items-center justify-between gap-3">
-              <span class="text-sm font-semibold text-highlighted">Resumo seguro</span>
+              <span class="text-sm font-semibold text-highlighted">Vagas cadastradas</span>
               <UBadge
-                :color="result?.costs.availableInPayload ? 'success' : 'neutral'"
+                color="neutral"
                 variant="subtle"
               >
-                {{ result?.costs.availableInPayload ? 'Custo no payload' : 'Custo nao encontrado' }}
+                {{ vacancies.length }} registros
               </UBadge>
             </div>
           </template>
 
-          <div
-            v-if="result"
-            class="space-y-4"
-          >
-            <div class="grid gap-3 text-sm sm:grid-cols-3">
-              <div>
-                <p class="font-medium text-highlighted">
-                  Ator
-                </p>
-                <p class="mt-1 break-all text-muted">
-                  {{ result.actorId }}
-                </p>
-              </div>
-              <div>
-                <p class="font-medium text-highlighted">
-                  HTTP
-                </p>
-                <p class="mt-1 text-muted">
-                  {{ result.status || 'sem resposta' }}
-                </p>
-              </div>
-              <div>
-                <p class="font-medium text-highlighted">
-                  Custo
-                </p>
-                <p class="mt-1 text-muted">
-                  {{ result.costs.note }}
-                </p>
-              </div>
-            </div>
+          <UInput
+            v-model="search"
+            icon="i-lucide-search"
+            placeholder="Buscar por titulo, empresa, localizacao ou descricao"
+            class="mb-4"
+          />
 
-            <div class="overflow-x-auto rounded-lg border border-default">
-              <table class="min-w-full divide-y divide-default text-sm">
-                <thead class="bg-elevated">
-                  <tr>
-                    <th class="px-3 py-2 text-left font-semibold text-muted">
-                      Campo
-                    </th>
-                    <th class="px-3 py-2 text-left font-semibold text-muted">
-                      Ocorrencias
-                    </th>
-                    <th class="px-3 py-2 text-left font-semibold text-muted">
-                      Exemplos
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-default">
-                  <tr
-                    v-for="field in result.coverage"
-                    :key="field.path"
-                  >
-                    <td class="px-3 py-2 font-mono text-xs text-highlighted">
-                      {{ field.path }}
-                    </td>
-                    <td class="px-3 py-2 text-muted">
-                      {{ field.count }}
-                    </td>
-                    <td class="px-3 py-2 text-muted">
-                      {{ field.examples.join(' | ') }}
-                    </td>
-                  </tr>
-                  <tr v-if="result.coverage.length === 0">
-                    <td
-                      colspan="3"
-                      class="px-3 py-8 text-center text-muted"
-                    >
-                      Nenhum campo retornado para resumir.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          <div
+            v-if="listPending"
+            class="py-10 text-center text-sm text-muted"
+          >
+            Carregando vagas...
           </div>
 
-          <UAlert
+          <div
+            v-else-if="vacancies.length === 0"
+            class="py-10 text-center"
+          >
+            <UIcon
+              name="i-lucide-inbox"
+              class="mx-auto size-8 text-muted"
+            />
+            <p class="mt-3 text-sm text-muted">
+              Nenhuma vaga encontrada.
+            </p>
+          </div>
+
+          <div
             v-else
-            color="neutral"
-            variant="subtle"
-            icon="i-lucide-info"
-            title="Nenhuma chamada executada"
-            description="Preencha a consulta e clique em executar para inspecionar uma resposta real."
-          />
+            class="divide-y divide-default"
+          >
+            <article
+              v-for="vacancy in vacancies"
+              :key="vacancy.id"
+              class="grid gap-3 py-4 md:grid-cols-[1fr_auto] md:items-center"
+            >
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <NuxtLink
+                    :to="`/vacancies/${vacancy.id}`"
+                    class="font-semibold text-highlighted hover:text-primary"
+                  >
+                    {{ vacancy.title }}
+                  </NuxtLink>
+                  <UBadge
+                    v-if="vacancy.seniority"
+                    color="primary"
+                    variant="subtle"
+                  >
+                    {{ vacancy.seniority }}
+                  </UBadge>
+                </div>
+                <p class="mt-1 text-sm text-muted">
+                  {{ vacancy.company }} � {{ vacancy.location }}
+                </p>
+                <p class="mt-2 line-clamp-2 text-sm leading-6 text-toned">
+                  {{ vacancy.descriptionPreview }}
+                </p>
+              </div>
+
+              <UButton
+                :to="`/vacancies/${vacancy.id}`"
+                icon="i-lucide-arrow-right"
+                color="neutral"
+                variant="subtle"
+              >
+                Ver detalhes
+              </UButton>
+            </article>
+          </div>
         </UCard>
       </section>
     </div>
-
-    <UCard class="mt-6">
-      <template #header>
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-sm font-semibold text-highlighted">Payload bruto</span>
-          <UBadge
-            color="neutral"
-            variant="subtle"
-          >
-            Somente resposta
-          </UBadge>
-        </div>
-      </template>
-      <pre class="max-h-[560px] overflow-auto whitespace-pre-wrap rounded-lg bg-elevated p-4 text-xs leading-5 text-toned"><code>{{ rawPayload || 'Execute uma chamada para ver o payload bruto.' }}</code></pre>
-    </UCard>
   </UContainer>
 </template>

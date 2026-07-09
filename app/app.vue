@@ -37,6 +37,24 @@ useSeoMeta({
       </template>
 
       <template #right>
+        <UButton
+          to="/"
+          icon="i-lucide-briefcase-business"
+          color="neutral"
+          variant="ghost"
+        >
+          Vagas
+        </UButton>
+
+        <UButton
+          to="/probe"
+          icon="i-lucide-radar"
+          color="neutral"
+          variant="ghost"
+        >
+          Probe
+        </UButton>
+
         <UColorModeButton />
 
         <UButton
