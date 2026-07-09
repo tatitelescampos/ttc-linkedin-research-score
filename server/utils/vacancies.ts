@@ -11,6 +11,8 @@ type CreateVacancyInput = {
   sourceUrl?: unknown
   seniority?: unknown
   sourcingComment?: unknown
+  sourceType?: unknown
+  originalDescription?: unknown
   description?: unknown
 }
 
@@ -71,13 +73,24 @@ const requireText = (value: unknown, field: string, minLength = 1) => {
   return text
 }
 
+const parseSourceType = (value: unknown) => {
+  const sourceType = normalizeText(value) || 'pasted_text'
+
+  if (!['pasted_text', 'pdf_upload'].includes(sourceType)) {
+    throw new VacancyValidationError('Tipo de origem da vaga invalido.')
+  }
+
+  return sourceType
+}
+
 const parseCreateVacancyInput = (input: CreateVacancyInput) => {
   const title = requireText(input.title, 'Titulo da vaga')
   const company = requireText(input.company, 'Empresa')
   const location = requireText(input.location, 'Localizacao')
   const description = requireText(input.description, 'Descricao da vaga', 30)
+  const originalDescription = normalizeText(input.originalDescription) || description
 
-  if (description.length > 100_000) {
+  if (description.length > 100_000 || originalDescription.length > 100_000) {
     throw new VacancyValidationError('Descricao da vaga deve ter no maximo 100.000 caracteres.')
   }
 
@@ -88,6 +101,8 @@ const parseCreateVacancyInput = (input: CreateVacancyInput) => {
     sourceUrl: parseOptionalUrl(input.sourceUrl),
     seniority: optionalText(input.seniority),
     sourcingComment: optionalText(input.sourcingComment),
+    sourceType: parseSourceType(input.sourceType),
+    originalDescription,
     description
   }
 }
@@ -113,8 +128,8 @@ export const createVacancy = async (input: CreateVacancyInput, database: Databas
   const [version] = await database.insert(vacancyVersions).values({
     vacancyId: vacancy.id,
     versionNumber: 1,
-    sourceType: 'pasted_text',
-    originalText: parsed.description,
+    sourceType: parsed.sourceType,
+    originalText: parsed.originalDescription,
     reviewedText: parsed.description
   }).returning()
 

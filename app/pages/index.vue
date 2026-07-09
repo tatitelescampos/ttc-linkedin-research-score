@@ -11,6 +11,14 @@ type VacancyListItem = {
   createdAt: string
 }
 
+type PdfExtractionResult = {
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  extractedText: string
+  characterCount: number
+}
+
 const emptyForm = () => ({
   title: '',
   company: '',
@@ -22,10 +30,15 @@ const emptyForm = () => ({
 })
 
 const form = reactive(emptyForm())
+const mode = ref<'paste' | 'pdf'>('paste')
 const search = ref('')
 const createPending = ref(false)
+const extractPending = ref(false)
 const createError = ref('')
 const createSuccess = ref('')
+const extractionError = ref('')
+const extractedPdf = ref<PdfExtractionResult | null>(null)
+const selectedPdf = ref<File | null>(null)
 
 const { data: vacancies, pending: listPending, refresh } = await useFetch<VacancyListItem[]>('/api/vacancies', {
   query: { search },
@@ -36,6 +49,50 @@ watch(search, () => refresh())
 
 const resetForm = () => {
   Object.assign(form, emptyForm())
+  selectedPdf.value = null
+  extractedPdf.value = null
+  extractionError.value = ''
+}
+
+const selectMode = (nextMode: 'paste' | 'pdf') => {
+  mode.value = nextMode
+  createError.value = ''
+  createSuccess.value = ''
+  extractionError.value = ''
+}
+
+const handlePdfChange = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  selectedPdf.value = input.files?.[0] ?? null
+  extractedPdf.value = null
+  extractionError.value = ''
+}
+
+const extractPdf = async () => {
+  if (!selectedPdf.value) {
+    extractionError.value = 'Selecione um PDF antes de extrair.'
+    return
+  }
+
+  extractPending.value = true
+  extractionError.value = ''
+  createSuccess.value = ''
+
+  try {
+    const body = new FormData()
+    body.append('file', selectedPdf.value)
+    const result = await $fetch<PdfExtractionResult>('/api/vacancies/extract-pdf', {
+      method: 'POST',
+      body
+    })
+
+    extractedPdf.value = result
+    form.description = result.extractedText
+  } catch (error) {
+    extractionError.value = error instanceof Error ? error.message : 'Nao foi possivel extrair texto do PDF.'
+  } finally {
+    extractPending.value = false
+  }
 }
 
 const createVacancy = async () => {
@@ -46,7 +103,11 @@ const createVacancy = async () => {
   try {
     const vacancy = await $fetch<{ id: number }>('/api/vacancies', {
       method: 'POST',
-      body: form
+      body: {
+        ...form,
+        sourceType: mode.value === 'pdf' ? 'pdf_upload' : 'pasted_text',
+        originalDescription: mode.value === 'pdf' ? extractedPdf.value?.extractedText : form.description
+      }
     })
 
     resetForm()
@@ -77,7 +138,7 @@ const createVacancy = async () => {
             Criar e navegar vagas
           </h1>
           <p class="mt-3 text-sm leading-6 text-muted">
-            Cole uma descricao de vaga, registre os metadados principais e preserve a primeira versao para analise e sourcing futuros.
+            Cole uma descricao ou importe um PDF digital, revise o texto e preserve a primeira versao para analise e sourcing futuros.
           </p>
         </div>
 
@@ -85,12 +146,24 @@ const createVacancy = async () => {
           <template #header>
             <div class="flex items-center justify-between gap-3">
               <span class="text-sm font-semibold text-highlighted">Criar vaga</span>
-              <UBadge
-                color="neutral"
-                variant="subtle"
-              >
-                Texto colado
-              </UBadge>
+              <div class="flex gap-2">
+                <UButton
+                  size="xs"
+                  :color="mode === 'paste' ? 'primary' : 'neutral'"
+                  :variant="mode === 'paste' ? 'solid' : 'subtle'"
+                  @click="selectMode('paste')"
+                >
+                  Colar texto
+                </UButton>
+                <UButton
+                  size="xs"
+                  :color="mode === 'pdf' ? 'primary' : 'neutral'"
+                  :variant="mode === 'pdf' ? 'solid' : 'subtle'"
+                  @click="selectMode('pdf')"
+                >
+                  Importar PDF
+                </UButton>
+              </div>
             </div>
           </template>
 
@@ -98,6 +171,57 @@ const createVacancy = async () => {
             class="space-y-5"
             @submit.prevent="createVacancy"
           >
+            <div
+              v-if="mode === 'pdf'"
+              class="space-y-4 rounded-lg border border-default p-4"
+            >
+              <UFormField
+                label="PDF digital da vaga"
+                name="pdf"
+                help="Use PDFs digitais com texto selecionavel. PDFs escaneados entram no proximo slice de OCR."
+                required
+              >
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  class="block w-full text-sm text-toned file:mr-4 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-semibold file:text-inverted"
+                  @change="handlePdfChange"
+                >
+              </UFormField>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <UButton
+                  type="button"
+                  icon="i-lucide-file-text"
+                  :loading="extractPending"
+                  :disabled="!selectedPdf"
+                  @click="extractPdf"
+                >
+                  Extrair texto
+                </UButton>
+                <span class="text-sm text-muted">
+                  {{ selectedPdf?.name || 'Nenhum PDF selecionado' }}
+                </span>
+              </div>
+
+              <UAlert
+                v-if="extractionError"
+                color="error"
+                variant="subtle"
+                icon="i-lucide-circle-alert"
+                title="Falha na extracao"
+                :description="extractionError"
+              />
+              <UAlert
+                v-if="extractedPdf"
+                color="success"
+                variant="subtle"
+                icon="i-lucide-check-circle"
+                title="Texto extraido para revisao"
+                :description="`${extractedPdf.characterCount} caracteres extraidos de ${extractedPdf.filename}.`"
+              />
+            </div>
+
             <UFormField
               label="Titulo da vaga"
               name="title"
@@ -172,7 +296,7 @@ const createVacancy = async () => {
             </UFormField>
 
             <UFormField
-              label="Descricao original"
+              :label="mode === 'pdf' ? 'Texto extraido para revisao' : 'Descricao original'"
               name="description"
               help="Esta primeira versao fica preservada para auditoria."
               required
@@ -181,7 +305,7 @@ const createVacancy = async () => {
                 v-model="form.description"
                 :rows="10"
                 class="w-full"
-                placeholder="Cole a descricao completa da vaga..."
+                :placeholder="mode === 'pdf' ? 'Extraia o PDF e corrija o texto aqui...' : 'Cole a descricao completa da vaga...'"
               />
             </UFormField>
 
@@ -209,7 +333,7 @@ const createVacancy = async () => {
               class="text-inverted"
               block
             >
-              Salvar vaga
+              {{ mode === 'pdf' ? 'Salvar vaga revisada' : 'Salvar vaga' }}
             </UButton>
           </form>
         </UCard>
@@ -282,7 +406,7 @@ const createVacancy = async () => {
                   </UBadge>
                 </div>
                 <p class="mt-1 text-sm text-muted">
-                  {{ vacancy.company }} � {{ vacancy.location }}
+                  {{ vacancy.company }} - {{ vacancy.location }}
                 </p>
                 <p class="mt-2 line-clamp-2 text-sm leading-6 text-toned">
                   {{ vacancy.descriptionPreview }}

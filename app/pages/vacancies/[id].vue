@@ -98,7 +98,7 @@ const { data: vacancy, pending, error } = await useFetch<VacancyDetail>(`/api/va
             color="success"
             variant="subtle"
           >
-            {{ vacancy.versions.length }} versao inicial preservada
+            {{ vacancy.currentVersion?.sourceType === 'pdf_upload' ? 'PDF importado' : 'Texto colado' }}
           </UBadge>
         </div>
       </div>

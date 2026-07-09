@@ -105,6 +105,25 @@ describe('vacancies', () => {
     expect(filtered[0]).not.toHaveProperty('currentVersion')
   })
 
+  it('preserves raw extracted PDF text separately from reviewed vacancy text', async () => {
+    const db = await createTestDb()
+    const extractedText = `${amazonDescription}\nExtraction footer noise`
+    const reviewedText = amazonDescription
+
+    const vacancy = await createVacancy({
+      title: 'Head, Last Mile Growth & Ops',
+      company: 'Amazon',
+      location: 'Osasco, S�o Paulo, Brazil',
+      sourceType: 'pdf_upload',
+      originalDescription: extractedText,
+      description: reviewedText
+    }, db)
+
+    expect(vacancy?.currentVersion?.sourceType).toBe('pdf_upload')
+    expect(vacancy?.currentVersion?.originalText).toBe(extractedText.trim())
+    expect(vacancy?.currentVersion?.reviewedText).toBe(reviewedText.trim())
+  })
+
   it('rejects incomplete pasted vacancy text before writing', async () => {
     const db = await createTestDb()
 
