@@ -15,6 +15,13 @@
       "when": 1783639352841,
       "tag": "0001_brown_marvex",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783641231632,
+      "tag": "0002_mock_analysis",
+      "breakpoints": true
     }
   ]
 }
