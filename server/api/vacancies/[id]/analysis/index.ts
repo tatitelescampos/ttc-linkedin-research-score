@@ -1,4 +1,4 @@
-import { generateMockVacancyAnalysis, getVacancyAnalysis, updateVacancyAnalysis } from '../../../../utils/vacancyAnalysis'
+import { generateMockVacancyAnalysis, generateOpenRouterVacancyAnalysis, getVacancyAnalysis, updateVacancyAnalysis } from '../../../../utils/vacancyAnalysis'
 import { VacancyValidationError } from '../../../../utils/vacancies'
 
 export default defineEventHandler(async (event) => {
@@ -10,7 +10,8 @@ export default defineEventHandler(async (event) => {
     }
 
     if (event.method === 'POST') {
-      return await generateMockVacancyAnalysis(id)
+      const body = await readBody(event).catch(() => ({})) as { mode?: string }
+      return body.mode === 'openrouter' ? await generateOpenRouterVacancyAnalysis(id) : await generateMockVacancyAnalysis(id)
     }
 
     if (event.method === 'PUT') {

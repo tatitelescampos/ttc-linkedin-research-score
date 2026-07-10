@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/libsql'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as schema from '../database/schema'
 import { createVacancy, VacancyValidationError } from './vacancies'
-import { approveVacancyAnalysis, assertApprovedVacancyAnalysis, generateMockVacancyAnalysis, updateVacancyAnalysis } from './vacancyAnalysis'
+import { approveVacancyAnalysis, assertApprovedVacancyAnalysis, generateMockVacancyAnalysis, generateOpenRouterVacancyAnalysis, getVacancyAnalysis, updateVacancyAnalysis } from './vacancyAnalysis'
 
 const testDbs: Array<{ close: () => void }> = []
 
@@ -19,6 +19,7 @@ const createTestDb = async () => {
   await client.execute(`CREATE TABLE vacancy_analyses (id integer PRIMARY KEY AUTOINCREMENT NOT NULL,vacancy_id integer NOT NULL REFERENCES vacancies(id),vacancy_version_id integer NOT NULL REFERENCES vacancy_versions(id),status text DEFAULT 'draft' NOT NULL,seniority text,titles_json text DEFAULT '[]' NOT NULL,locations_json text DEFAULT '[]' NOT NULL,ambiguities_json text DEFAULT '[]' NOT NULL,approved_at text,created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL);`)
   await client.execute('CREATE UNIQUE INDEX vacancy_analyses_vacancy_id_unique ON vacancy_analyses (vacancy_id);')
   await client.execute(`CREATE TABLE vacancy_analysis_requirements (id integer PRIMARY KEY AUTOINCREMENT NOT NULL,analysis_id integer NOT NULL REFERENCES vacancy_analyses(id),category text NOT NULL,label text NOT NULL,normalized_label text NOT NULL,provenance text NOT NULL,weight integer DEFAULT 50 NOT NULL,is_mandatory integer DEFAULT false NOT NULL,is_eliminatory integer DEFAULT false NOT NULL,sort_order integer DEFAULT 0 NOT NULL,created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL);`)
+  await client.execute(`CREATE TABLE vacancy_analysis_runs (id integer PRIMARY KEY AUTOINCREMENT NOT NULL,vacancy_id integer NOT NULL REFERENCES vacancies(id),vacancy_version_id integer NOT NULL REFERENCES vacancy_versions(id),analysis_id integer REFERENCES vacancy_analyses(id),source text NOT NULL,status text NOT NULL,model text,cost_usd text,error_message text,created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL);`)
 
   testDbs.push({ close: () => client.close() })
 
@@ -79,6 +80,55 @@ describe('vacancy analysis', () => {
       'stakeholder management',
       'people leadership'
     ]))
+  })
+
+  it('generates a live OpenRouter analysis through an injected client and records model and cost metadata', async () => {
+    const { db, vacancy } = await createAnalyzedVacancy()
+
+    const analysis = await generateOpenRouterVacancyAnalysis(vacancy.id, db, {
+      analyze: async () => ({
+        model: 'openrouter/test-model',
+        costUsd: '0.0012',
+        content: {
+          seniority: 'Head',
+          titles: ['Head, Last Mile Growth & Ops'],
+          locations: ['Osasco, Sao Paulo, Brazil'],
+          ambiguities: ['Confirm scope of delivery partner ownership.'],
+          requirements: [
+            {
+              category: 'experience',
+              label: 'Last mile operations leadership',
+              normalizedLabel: 'last mile operations leadership',
+              provenance: 'looking for a senior operations leader',
+              weight: 92,
+              isMandatory: true,
+              isEliminatory: false
+            }
+          ]
+        }
+      })
+    })
+
+    expect(analysis?.status).toBe('draft')
+    expect(analysis?.source).toBe('openrouter')
+    expect(analysis?.latestRun).toMatchObject({ source: 'openrouter', status: 'success', model: 'openrouter/test-model', costUsd: '0.0012' })
+    expect(analysis?.requirements[0]).toMatchObject({ label: 'Last mile operations leadership', weight: 92 })
+  })
+
+  it('records invalid OpenRouter responses without corrupting the current approved analysis', async () => {
+    const { db, vacancy } = await createAnalyzedVacancy()
+    const generated = await generateMockVacancyAnalysis(vacancy.id, db)
+    const approved = await approveVacancyAnalysis(vacancy.id, db)
+
+    await expect(generateOpenRouterVacancyAnalysis(vacancy.id, db, {
+      analyze: async () => ({ model: 'openrouter/bad-model', costUsd: '0.0004', content: { seniority: 'Head', titles: [] } })
+    })).rejects.toMatchObject({ statusCode: 502 })
+
+    const current = await getVacancyAnalysis(vacancy.id, db)
+    expect(approved?.status).toBe('approved')
+    expect(current?.status).toBe('approved')
+    expect(current?.requirements).toHaveLength(generated?.requirements.length ?? 0)
+    expect(current?.latestRun).toMatchObject({ source: 'openrouter', status: 'error', model: 'openrouter/bad-model' })
   })
 
   it('lets recruiters edit, add, remove, and normalize requirements while returning the analysis to draft', async () => {
