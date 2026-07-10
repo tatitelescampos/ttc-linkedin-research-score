@@ -1,4 +1,4 @@
-import { extractDigitalPdfText, PdfExtractionError } from '../../utils/pdfExtraction'
+import { extractPdfText, PdfExtractionError } from '../../utils/pdfExtraction'
 
 export default defineEventHandler(async (event) => {
   const parts = await readMultipartFormData(event)
@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    return await extractDigitalPdfText({
+    return await extractPdfText({
       filename: file.filename,
       type: file.type,
       data: file.data

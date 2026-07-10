@@ -21,10 +21,12 @@
     "@iconify-json/simple-icons": "^1.2.87",
     "@libsql/client": "^0.17.4",
     "@nuxt/ui": "^4.9.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "drizzle-orm": "^0.45.2",
     "nuxt": "^4.4.8",
     "pdf-parse": "^2.4.5",
-    "tailwindcss": "^4.3.1"
+    "tailwindcss": "^4.3.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.16.0",
