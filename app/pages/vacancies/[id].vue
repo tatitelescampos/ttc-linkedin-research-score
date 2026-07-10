@@ -32,6 +32,16 @@ type Requirement = {
   isEliminatory: boolean
 }
 
+type AnalysisRun = {
+  id: number
+  source: 'mock' | 'openrouter'
+  status: 'success' | 'error'
+  model: string | null
+  costUsd: string | null
+  errorMessage: string | null
+  createdAt: string
+}
+
 type VacancyAnalysis = {
   id: number
   vacancyId: number
@@ -42,6 +52,8 @@ type VacancyAnalysis = {
   locations: string[]
   ambiguities: string[]
   approvedAt: string | null
+  source: 'mock' | 'openrouter'
+  latestRun: AnalysisRun | null
   requirements: Requirement[]
   canMoveForward: boolean
 }
@@ -76,16 +88,17 @@ const loadForm = (value: VacancyAnalysis | null | undefined) => {
 
 watch(analysis, value => loadForm(value), { immediate: true })
 
-const generateAnalysis = async () => {
+const generateAnalysis = async (mode: 'mock' | 'openrouter' = 'mock') => {
   busy.value = true
   saveError.value = ''
 
   try {
-    analysis.value = await $fetch<VacancyAnalysis>(`/api/vacancies/${vacancyId.value}/analysis`, { method: 'POST' })
+    analysis.value = await $fetch<VacancyAnalysis>(`/api/vacancies/${vacancyId.value}/analysis`, { method: 'POST', body: { mode } })
     loadForm(analysis.value)
-    toast.add({ title: 'Analise gerada', color: 'success' })
+    toast.add({ title: mode === 'openrouter' ? 'Analise live gerada' : 'Analise mock gerada', color: 'success' })
   } catch (err) {
     saveError.value = err instanceof Error ? err.message : 'Nao foi possivel gerar a analise.'
+    await refreshAnalysis()
   } finally {
     busy.value = false
   }
@@ -242,7 +255,7 @@ const approveAnalysis = async () => {
       <UCard>
         <template #header>
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <span class="text-sm font-semibold text-highlighted">Analise mock da vaga</span>
+            <span class="text-sm font-semibold text-highlighted">Analise da vaga</span>
             <div class="flex flex-wrap items-center gap-2">
               <UBadge
                 :color="analysis?.canMoveForward ? 'success' : 'warning'"
@@ -250,14 +263,29 @@ const approveAnalysis = async () => {
               >
                 {{ analysis?.canMoveForward ? 'Aprovada para seguir' : 'Precisa aprovacao' }}
               </UBadge>
+              <UBadge
+                v-if="analysis?.latestRun"
+                :color="analysis.latestRun.source === 'openrouter' ? 'primary' : 'neutral'"
+                variant="subtle"
+              >
+                {{ analysis.latestRun.source === 'openrouter' ? 'Live OpenRouter' : 'Mock' }}
+              </UBadge>
               <UButton
                 icon="i-lucide-sparkles"
                 color="primary"
                 variant="subtle"
                 :loading="busy"
-                @click="generateAnalysis"
+                @click="generateAnalysis('mock')"
               >
-                {{ analysis ? 'Gerar novamente' : 'Gerar analise' }}
+                {{ analysis ? 'Gerar mock novamente' : 'Gerar mock' }}
+              </UButton>
+              <UButton
+                icon="i-lucide-radio"
+                color="primary"
+                :loading="busy"
+                @click="generateAnalysis('openrouter')"
+              >
+                Gerar live
               </UButton>
             </div>
           </div>
@@ -267,7 +295,7 @@ const approveAnalysis = async () => {
           v-if="!analysis"
           class="py-10 text-center text-sm text-muted"
         >
-          Gere uma analise deterministica a partir da descricao revisada antes de seguir.
+          Gere uma analise mock ou live a partir da descricao revisada antes de seguir.
         </div>
 
         <div
@@ -281,6 +309,36 @@ const approveAnalysis = async () => {
             icon="i-lucide-circle-alert"
             :description="saveError"
           />
+
+          <div
+            v-if="analysis.latestRun"
+            class="grid gap-3 rounded-lg border border-default p-3 text-sm md:grid-cols-4"
+          >
+            <div>
+              <span class="block text-muted">Origem</span>
+              <span class="font-medium text-highlighted">{{ analysis.latestRun.source === 'openrouter' ? 'Live OpenRouter' : 'Mock' }}</span>
+            </div>
+            <div>
+              <span class="block text-muted">Modelo</span>
+              <span class="font-medium text-highlighted">{{ analysis.latestRun.model ?? '-' }}</span>
+            </div>
+            <div>
+              <span class="block text-muted">Custo</span>
+              <span class="font-medium text-highlighted">{{ analysis.latestRun.costUsd ? `$${analysis.latestRun.costUsd}` : '-' }}</span>
+            </div>
+            <div>
+              <span class="block text-muted">Status</span>
+              <span class="font-medium text-highlighted">{{ analysis.latestRun.status === 'success' ? 'Sucesso' : 'Erro' }}</span>
+            </div>
+            <UAlert
+              v-if="analysis.latestRun.errorMessage"
+              class="md:col-span-4"
+              color="error"
+              variant="subtle"
+              icon="i-lucide-circle-alert"
+              :description="analysis.latestRun.errorMessage"
+            />
+          </div>
 
           <div class="grid gap-4 md:grid-cols-3">
             <UFormField label="Seniority">

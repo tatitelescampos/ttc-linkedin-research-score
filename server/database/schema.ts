@@ -62,3 +62,16 @@ export const vacancyAnalysisRequirements = sqliteTable('vacancy_analysis_require
   sortOrder: int('sort_order').notNull().default(0),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
 })
+
+export const vacancyAnalysisRuns = sqliteTable('vacancy_analysis_runs', {
+  id: int().primaryKey({ autoIncrement: true }),
+  vacancyId: int('vacancy_id').notNull().references(() => vacancies.id),
+  vacancyVersionId: int('vacancy_version_id').notNull().references(() => vacancyVersions.id),
+  analysisId: int('analysis_id').references(() => vacancyAnalyses.id),
+  source: text().notNull(),
+  status: text().notNull(),
+  model: text(),
+  costUsd: text('cost_usd'),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})

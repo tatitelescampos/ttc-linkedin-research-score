@@ -22,6 +22,13 @@
       "when": 1783641231632,
       "tag": "0002_mock_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1783700000000,
+      "tag": "0003_openrouter_analysis_runs",
+      "breakpoints": true
     }
   ]
 }

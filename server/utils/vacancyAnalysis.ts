@@ -1,5 +1,5 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
-import { vacancies, vacancyAnalyses, vacancyAnalysisRequirements, vacancyVersions } from '../database/schema'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { vacancies, vacancyAnalyses, vacancyAnalysisRequirements, vacancyAnalysisRuns, vacancyVersions } from '../database/schema'
 import { db as defaultDb } from './db'
 import { getVacancy, VacancyValidationError } from './vacancies'
 
@@ -25,6 +25,27 @@ type UpdateAnalysisInput = {
   requirements?: unknown
 }
 
+type AnalysisDraft = {
+  seniority: string | null
+  titles: string[]
+  locations: string[]
+  ambiguities: string[]
+  requirements: RequirementDraft[]
+}
+
+export type VacancyAnalysisSource = 'mock' | 'openrouter'
+export type VacancyAnalysisRunStatus = 'success' | 'error'
+
+export type VacancyAnalysisRunDetail = {
+  id: number
+  source: VacancyAnalysisSource
+  status: VacancyAnalysisRunStatus
+  model: string | null
+  costUsd: string | null
+  errorMessage: string | null
+  createdAt: string
+}
+
 export type VacancyAnalysisRequirement = RequirementDraft & {
   id: number
   sortOrder: number
@@ -43,8 +64,14 @@ export type VacancyAnalysisDetail = {
   approvedAt: string | null
   createdAt: string
   updatedAt: string
+  source: VacancyAnalysisSource
+  latestRun: VacancyAnalysisRunDetail | null
   requirements: VacancyAnalysisRequirement[]
   canMoveForward: boolean
+}
+
+export type OpenRouterAnalysisClient = {
+  analyze: (input: { title: string, company: string, location: string, seniority: string | null, text: string }) => Promise<{ model: string, costUsd: string | null, content: unknown }>
 }
 
 const normalizeText = (value: unknown) => typeof value === 'string' ? value.trim() : ''
@@ -182,13 +209,13 @@ const inferAmbiguities = (text: string, seniority: string | null, locations: str
 const inferRequirements = (text: string): RequirementDraft[] => {
   const requirements: RequirementDraft[] = []
 
-  addRequirement(requirements, text, /program management|gest[aã]o de programas/i, { category: 'experience', label: 'Program management', normalizedLabel: 'program management', weight: 85, isMandatory: true, isEliminatory: false })
-  addRequirement(requirements, text, /operations leadership|lideran[cç]a.*opera/i, { category: 'experience', label: 'Operations leadership', normalizedLabel: 'operations leadership', weight: 90, isMandatory: true, isEliminatory: false })
-  addRequirement(requirements, text, /logistics|last mile|delivery|transportation|supply chain|opera[cç][oõ]es logisticas/i, { category: 'domain', label: 'Logistics or supply chain domain', normalizedLabel: 'logistics supply chain', weight: 80, isMandatory: true, isEliminatory: false })
-  addRequirement(requirements, text, /English|ingles|ingl[eê]s/i, { category: 'language', label: 'English proficiency', normalizedLabel: 'english proficiency', weight: 70, isMandatory: true, isEliminatory: true })
-  addRequirement(requirements, text, /analytical|data|metrics|anal[ií]tic/i, { category: 'skill', label: 'Analytical capability', normalizedLabel: 'analytical capability', weight: 65, isMandatory: false, isEliminatory: false })
+  addRequirement(requirements, text, /program management|gest[a\u00e3]o de programas/i, { category: 'experience', label: 'Program management', normalizedLabel: 'program management', weight: 85, isMandatory: true, isEliminatory: false })
+  addRequirement(requirements, text, /operations leadership|lideran[c\u00e7]a.*opera/i, { category: 'experience', label: 'Operations leadership', normalizedLabel: 'operations leadership', weight: 90, isMandatory: true, isEliminatory: false })
+  addRequirement(requirements, text, /logistics|last mile|delivery|transportation|supply chain|opera[c\u00e7][o\u00f5]es logisticas/i, { category: 'domain', label: 'Logistics or supply chain domain', normalizedLabel: 'logistics supply chain', weight: 80, isMandatory: true, isEliminatory: false })
+  addRequirement(requirements, text, /English|ingles|ingl[e\u00ea]s/i, { category: 'language', label: 'English proficiency', normalizedLabel: 'english proficiency', weight: 70, isMandatory: true, isEliminatory: true })
+  addRequirement(requirements, text, /analytical|data|metrics|anal[i\u00ed]tic/i, { category: 'skill', label: 'Analytical capability', normalizedLabel: 'analytical capability', weight: 65, isMandatory: false, isEliminatory: false })
   addRequirement(requirements, text, /stakeholder|cross-functional|multifuncional/i, { category: 'skill', label: 'Cross-functional stakeholder management', normalizedLabel: 'stakeholder management', weight: 60, isMandatory: false, isEliminatory: false })
-  addRequirement(requirements, text, /people management|lead people|liderar pessoas|gest[aã]o de pessoas/i, { category: 'experience', label: 'People leadership', normalizedLabel: 'people leadership', weight: 60, isMandatory: false, isEliminatory: false })
+  addRequirement(requirements, text, /people management|lead people|liderar pessoas|gest[a\u00e3]o de pessoas/i, { category: 'experience', label: 'People leadership', normalizedLabel: 'people leadership', weight: 60, isMandatory: false, isEliminatory: false })
 
   if (requirements.length === 0) {
     requirements.push({ category: 'experience', label: 'Review vacancy text manually', normalizedLabel: 'manual review', provenance: text.replace(/\s+/g, ' ').trim().slice(0, 220), weight: 50, isMandatory: false, isEliminatory: false })
@@ -219,6 +246,170 @@ const parseRequirements = (value: unknown) => {
   })
 }
 
+const validateGeneratedAnalysis = (value: unknown): AnalysisDraft => {
+  if (!value || typeof value !== 'object') {
+    throw new VacancyValidationError('OpenRouter retornou uma analise em formato invalido.', 502)
+  }
+
+  const input = value as UpdateAnalysisInput
+
+  try {
+    const requirements = parseRequirements(input.requirements)
+
+    if (requirements.length === 0) {
+      throw new VacancyValidationError('OpenRouter nao retornou requisitos para revisar.', 502)
+    }
+
+    return {
+      seniority: optionalText(input.seniority),
+      titles: parseStringList(input.titles, 'Titulos'),
+      locations: parseStringList(input.locations, 'Localizacoes'),
+      ambiguities: parseStringList(input.ambiguities, 'Ambiguidades'),
+      requirements
+    }
+  } catch (error) {
+    if (error instanceof VacancyValidationError && error.statusCode === 502) {
+      throw error
+    }
+
+    const message = error instanceof Error ? error.message : 'OpenRouter retornou uma analise em formato invalido.'
+    throw new VacancyValidationError(message, 502)
+  }
+}
+
+const analysisResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['seniority', 'titles', 'locations', 'ambiguities', 'requirements'],
+  properties: {
+    seniority: { type: ['string', 'null'] },
+    titles: { type: 'array', items: { type: 'string' } },
+    locations: { type: 'array', items: { type: 'string' } },
+    ambiguities: { type: 'array', items: { type: 'string' } },
+    requirements: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['category', 'label', 'normalizedLabel', 'provenance', 'weight', 'isMandatory', 'isEliminatory'],
+        properties: {
+          category: { type: 'string' },
+          label: { type: 'string' },
+          normalizedLabel: { type: 'string' },
+          provenance: { type: 'string' },
+          weight: { type: 'integer', minimum: 0, maximum: 100 },
+          isMandatory: { type: 'boolean' },
+          isEliminatory: { type: 'boolean' }
+        }
+      }
+    }
+  }
+}
+
+const systemPrompt = 'Extract recruiter-reviewable job analysis as strict JSON. Keep evidence short and copied or paraphrased from the vacancy text. Use integer weights from 0 to 100.'
+
+const parseOpenRouterContent = (content: unknown) => {
+  if (typeof content !== 'string') {
+    return content
+  }
+
+  try {
+    return JSON.parse(content)
+  } catch {
+    throw new VacancyValidationError('OpenRouter retornou JSON invalido.', 502)
+  }
+}
+
+export const createOpenRouterAnalysisClient = (): OpenRouterAnalysisClient => ({
+  async analyze(input) {
+    const apiKey = process.env.NUXT_OPENROUTER_API_KEY
+    const model = process.env.NUXT_OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+
+    if (!apiKey) {
+      throw new VacancyValidationError('Configure NUXT_OPENROUTER_API_KEY para gerar analise live.', 400)
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'http://localhost:3000',
+        'X-Title': 'TTC LinkedIn Research Score'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: JSON.stringify(input) }
+        ],
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'vacancy_analysis',
+            strict: true,
+            schema: analysisResponseSchema
+          }
+        }
+      })
+    })
+
+    const body = await response.json().catch(() => null) as { choices?: Array<{ message?: { content?: unknown } }>, model?: string, usage?: { cost?: number, total_cost?: number }, error?: { message?: string } } | null
+
+    if (!response.ok) {
+      throw new VacancyValidationError(body?.error?.message ?? 'OpenRouter recusou a requisicao.', response.status)
+    }
+
+    return {
+      model: body?.model ?? model,
+      costUsd: String(body?.usage?.cost ?? body?.usage?.total_cost ?? '') || null,
+      content: parseOpenRouterContent(body?.choices?.[0]?.message?.content)
+    }
+  }
+})
+
+const getLatestRun = async (vacancyId: number, database: Database): Promise<VacancyAnalysisRunDetail | null> => {
+  const [run] = await database.select().from(vacancyAnalysisRuns)
+    .where(eq(vacancyAnalysisRuns.vacancyId, vacancyId))
+    .orderBy(desc(vacancyAnalysisRuns.createdAt), desc(vacancyAnalysisRuns.id))
+    .limit(1)
+
+  return run
+    ? {
+        id: run.id,
+        source: run.source === 'openrouter' ? 'openrouter' : 'mock',
+        status: run.status === 'success' ? 'success' : 'error',
+        model: run.model,
+        costUsd: run.costUsd,
+        errorMessage: run.errorMessage,
+        createdAt: run.createdAt
+      }
+    : null
+}
+
+const recordAnalysisRun = async (input: {
+  vacancyId: number
+  vacancyVersionId: number
+  analysisId?: number | null
+  source: VacancyAnalysisSource
+  status: VacancyAnalysisRunStatus
+  model?: string | null
+  costUsd?: string | null
+  errorMessage?: string | null
+}, database: Database) => {
+  await database.insert(vacancyAnalysisRuns).values({
+    vacancyId: input.vacancyId,
+    vacancyVersionId: input.vacancyVersionId,
+    analysisId: input.analysisId ?? null,
+    source: input.source,
+    status: input.status,
+    model: input.model ?? null,
+    costUsd: input.costUsd ?? null,
+    errorMessage: input.errorMessage ?? null
+  })
+}
+
 const serializeAnalysis = async (analysisId: number, database: Database): Promise<VacancyAnalysisDetail | null> => {
   const [analysis] = await database.select().from(vacancyAnalyses).where(eq(vacancyAnalyses.id, analysisId)).limit(1)
 
@@ -229,6 +420,7 @@ const serializeAnalysis = async (analysisId: number, database: Database): Promis
   const rows = await database.select().from(vacancyAnalysisRequirements)
     .where(eq(vacancyAnalysisRequirements.analysisId, analysis.id))
     .orderBy(asc(vacancyAnalysisRequirements.sortOrder), asc(vacancyAnalysisRequirements.id))
+  const latestRun = await getLatestRun(analysis.vacancyId, database)
 
   return {
     id: analysis.id,
@@ -242,6 +434,8 @@ const serializeAnalysis = async (analysisId: number, database: Database): Promis
     approvedAt: analysis.approvedAt,
     createdAt: analysis.createdAt,
     updatedAt: analysis.updatedAt,
+    source: latestRun?.source ?? 'mock',
+    latestRun,
     requirements: rows.map(row => ({
       id: row.id,
       category: row.category,
@@ -267,28 +461,16 @@ export const getVacancyAnalysis = async (vacancyId: number, database: Database =
   return analysis ? serializeAnalysis(analysis.id, database) : null
 }
 
-export const generateMockVacancyAnalysis = async (vacancyId: number, database: Database = defaultDb) => {
-  const vacancy = await getVacancy(vacancyId, database)
-
-  if (!vacancy?.currentVersion) {
-    throw new VacancyValidationError('Vaga nao encontrada.', 404)
-  }
-
-  const text = vacancy.currentVersion.reviewedText
-  const seniority = inferSeniority(vacancy.title, text, vacancy.seniority)
-  const titles = inferTitles(vacancy.title, text)
-  const locations = inferLocations(vacancy.location, text)
-  const ambiguities = inferAmbiguities(text, seniority, locations)
-  const requirements = inferRequirements(text)
+const saveGeneratedAnalysis = async (vacancyId: number, vacancyVersionId: number, draft: AnalysisDraft, database: Database) => {
   const existing = await getVacancyAnalysis(vacancyId, database)
   const values = {
     vacancyId,
-    vacancyVersionId: vacancy.currentVersion.id,
+    vacancyVersionId,
     status: 'draft',
-    seniority,
-    titlesJson: JSON.stringify(titles),
-    locationsJson: JSON.stringify(locations),
-    ambiguitiesJson: JSON.stringify(ambiguities),
+    seniority: draft.seniority,
+    titlesJson: JSON.stringify(draft.titles),
+    locationsJson: JSON.stringify(draft.locations),
+    ambiguitiesJson: JSON.stringify(draft.ambiguities),
     approvedAt: null,
     updatedAt: sql`CURRENT_TIMESTAMP`
   }
@@ -301,9 +483,67 @@ export const generateMockVacancyAnalysis = async (vacancyId: number, database: D
   }
 
   await database.delete(vacancyAnalysisRequirements).where(eq(vacancyAnalysisRequirements.analysisId, analysis.id))
-  await database.insert(vacancyAnalysisRequirements).values(requirements.map((requirement, index) => ({ analysisId: analysis.id, ...requirement, sortOrder: index })))
+  await database.insert(vacancyAnalysisRequirements).values(draft.requirements.map((requirement, index) => ({ analysisId: analysis.id, ...requirement, sortOrder: index })))
+
+  return analysis
+}
+
+export const generateMockVacancyAnalysis = async (vacancyId: number, database: Database = defaultDb) => {
+  const vacancy = await getVacancy(vacancyId, database)
+
+  if (!vacancy?.currentVersion) {
+    throw new VacancyValidationError('Vaga nao encontrada.', 404)
+  }
+
+  const text = vacancy.currentVersion.reviewedText
+  const draft = {
+    seniority: inferSeniority(vacancy.title, text, vacancy.seniority),
+    titles: inferTitles(vacancy.title, text),
+    locations: inferLocations(vacancy.location, text),
+    ambiguities: inferAmbiguities(text, inferSeniority(vacancy.title, text, vacancy.seniority), inferLocations(vacancy.location, text)),
+    requirements: inferRequirements(text)
+  }
+  const analysis = await saveGeneratedAnalysis(vacancyId, vacancy.currentVersion.id, draft, database)
+  await recordAnalysisRun({ vacancyId, vacancyVersionId: vacancy.currentVersion.id, analysisId: analysis.id, source: 'mock', status: 'success', model: 'deterministic-mock' }, database)
 
   return serializeAnalysis(analysis.id, database)
+}
+
+export const generateOpenRouterVacancyAnalysis = async (vacancyId: number, database: Database = defaultDb, client: OpenRouterAnalysisClient = createOpenRouterAnalysisClient()) => {
+  const vacancy = await getVacancy(vacancyId, database)
+
+  if (!vacancy?.currentVersion) {
+    throw new VacancyValidationError('Vaga nao encontrada.', 404)
+  }
+
+  let model: string | null = process.env.NUXT_OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+  let costUsd: string | null = null
+
+  try {
+    const response = await client.analyze({
+      title: vacancy.title,
+      company: vacancy.company,
+      location: vacancy.location,
+      seniority: vacancy.seniority,
+      text: vacancy.currentVersion.reviewedText
+    })
+    model = response.model
+    costUsd = response.costUsd
+    const draft = validateGeneratedAnalysis(response.content)
+    const analysis = await saveGeneratedAnalysis(vacancyId, vacancy.currentVersion.id, draft, database)
+    await recordAnalysisRun({ vacancyId, vacancyVersionId: vacancy.currentVersion.id, analysisId: analysis.id, source: 'openrouter', status: 'success', model, costUsd }, database)
+
+    return serializeAnalysis(analysis.id, database)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nao foi possivel gerar analise live.'
+    await recordAnalysisRun({ vacancyId, vacancyVersionId: vacancy.currentVersion.id, source: 'openrouter', status: 'error', model, costUsd, errorMessage: message }, database)
+
+    if (error instanceof VacancyValidationError) {
+      throw error
+    }
+
+    throw new VacancyValidationError(message, 502)
+  }
 }
 
 export const updateVacancyAnalysis = async (vacancyId: number, input: UpdateAnalysisInput, database: Database = defaultDb) => {
