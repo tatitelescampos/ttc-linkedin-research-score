@@ -75,3 +75,19 @@ export const vacancyAnalysisRuns = sqliteTable('vacancy_analysis_runs', {
   errorMessage: text('error_message'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
 })
+
+export const sourcingQueries = sqliteTable('sourcing_queries', {
+  id: int().primaryKey({ autoIncrement: true }),
+  vacancyId: int('vacancy_id').notNull().references(() => vacancies.id),
+  analysisId: int('analysis_id').notNull().references(() => vacancyAnalyses.id),
+  status: text().notNull().default('draft'),
+  versionNumber: int('version_number'),
+  queryText: text('query_text').notNull(),
+  providerFiltersJson: text('provider_filters_json').notNull().default('{}'),
+  explanation: text().notNull(),
+  assumptionsJson: text('assumptions_json').notNull().default('[]'),
+  limitationsJson: text('limitations_json').notNull().default('[]'),
+  approvedAt: text('approved_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})

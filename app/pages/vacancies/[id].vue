@@ -42,6 +42,25 @@ type AnalysisRun = {
   createdAt: string
 }
 
+type SourcingQuery = {
+  id: number
+  vacancyId: number
+  analysisId: number
+  status: 'draft' | 'approved'
+  versionNumber: number | null
+  queryText: string
+  providerFilters: Record<string, string[]>
+  explanation: string
+  assumptions: string[]
+  limitations: string[]
+  approvedAt: string | null
+  canSelectForRun: boolean
+}
+
+type SourcingQueryPlan = {
+  draft: SourcingQuery | null
+  approvedVersions: SourcingQuery[]
+}
 type VacancyAnalysis = {
   id: number
   vacancyId: number
@@ -63,6 +82,12 @@ const toast = useToast()
 const vacancyId = computed(() => Number(route.params.id))
 const { data: vacancy, pending, error } = await useFetch<VacancyDetail>(`/api/vacancies/${route.params.id}`)
 const { data: analysis, refresh: refreshAnalysis } = await useFetch<VacancyAnalysis | null>(`/api/vacancies/${route.params.id}/analysis`)
+const { data: sourcingQuery, refresh: refreshSourcingQuery } = await useFetch<SourcingQueryPlan>(`/api/vacancies/${route.params.id}/sourcing-query`)
+
+const queryForm = reactive({
+  queryText: '',
+  providerFiltersText: ''
+})
 
 const form = reactive({
   seniority: '',
@@ -73,10 +98,19 @@ const form = reactive({
 })
 const busy = ref(false)
 const saveError = ref('')
+const queryError = ref('')
 
 const splitLines = (value: string) => value.split('\n').map(item => item.trim()).filter(Boolean)
 const joinLines = (value: string[]) => value.join('\n')
 const normalizeLabel = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+const formatProviderFilters = (filters: Record<string, string[]> | undefined) => Object.entries(filters ?? {})
+  .map(([provider, values]) => `${provider}: ${values.join(', ')}`)
+  .join('\n')
+
+const parseProviderFiltersText = (value: string) => Object.fromEntries(splitLines(value).map((line) => {
+  const [provider = '', rawValues = ''] = line.split(':')
+  return [provider.trim(), rawValues.split(',').map(item => item.trim()).filter(Boolean)]
+}).filter(([provider]) => provider))
 
 const loadForm = (value: VacancyAnalysis | null | undefined) => {
   form.seniority = value?.seniority ?? ''
@@ -87,6 +121,13 @@ const loadForm = (value: VacancyAnalysis | null | undefined) => {
 }
 
 watch(analysis, value => loadForm(value), { immediate: true })
+
+const loadQueryForm = (value: SourcingQueryPlan | null | undefined) => {
+  queryForm.queryText = value?.draft?.queryText ?? ''
+  queryForm.providerFiltersText = formatProviderFilters(value?.draft?.providerFilters)
+}
+
+watch(sourcingQuery, value => loadQueryForm(value), { immediate: true })
 
 const generateAnalysis = async (mode: 'mock' | 'openrouter' = 'mock') => {
   busy.value = true
@@ -148,6 +189,58 @@ const saveAnalysis = async () => {
   }
 }
 
+const generateSourcingQuery = async () => {
+  busy.value = true
+  queryError.value = ''
+
+  try {
+    sourcingQuery.value = await $fetch<SourcingQueryPlan>(`/api/vacancies/${vacancyId.value}/sourcing-query`, { method: 'POST' })
+    loadQueryForm(sourcingQuery.value)
+    toast.add({ title: 'Query de sourcing gerada', color: 'success' })
+  } catch (err) {
+    queryError.value = err instanceof Error ? err.message : 'Nao foi possivel gerar a query.'
+    await refreshSourcingQuery()
+  } finally {
+    busy.value = false
+  }
+}
+
+const saveSourcingQuery = async () => {
+  busy.value = true
+  queryError.value = ''
+
+  try {
+    sourcingQuery.value = await $fetch<SourcingQueryPlan>(`/api/vacancies/${vacancyId.value}/sourcing-query`, {
+      method: 'PUT',
+      body: {
+        queryText: queryForm.queryText,
+        providerFilters: parseProviderFiltersText(queryForm.providerFiltersText)
+      }
+    })
+    loadQueryForm(sourcingQuery.value)
+    toast.add({ title: 'Query salva', color: 'success' })
+  } catch (err) {
+    queryError.value = err instanceof Error ? err.message : 'Nao foi possivel salvar a query.'
+  } finally {
+    busy.value = false
+  }
+}
+
+const approveSourcingQuery = async () => {
+  busy.value = true
+  queryError.value = ''
+
+  try {
+    sourcingQuery.value = await $fetch<SourcingQueryPlan>(`/api/vacancies/${vacancyId.value}/sourcing-query/approve`, { method: 'POST' })
+    await refreshSourcingQuery()
+    loadQueryForm(sourcingQuery.value)
+    toast.add({ title: 'Query aprovada', color: 'success' })
+  } catch (err) {
+    queryError.value = err instanceof Error ? err.message : 'Nao foi possivel aprovar a query.'
+  } finally {
+    busy.value = false
+  }
+}
 const approveAnalysis = async () => {
   busy.value = true
   saveError.value = ''
@@ -473,6 +566,164 @@ const approveAnalysis = async () => {
         </div>
       </UCard>
 
+      <UCard>
+        <template #header>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-semibold text-highlighted">Query de sourcing</span>
+              <UBadge
+                :color="sourcingQuery?.approvedVersions.length ? 'success' : 'warning'"
+                variant="subtle"
+              >
+                {{ sourcingQuery?.approvedVersions.length ? 'Aprovada para rodadas' : 'Precisa aprovacao' }}
+              </UBadge>
+            </div>
+            <UButton
+              icon="i-lucide-search"
+              color="primary"
+              variant="subtle"
+              :loading="busy"
+              :disabled="!analysis?.canMoveForward"
+              @click="generateSourcingQuery"
+            >
+              {{ sourcingQuery?.draft ? 'Gerar novamente' : 'Gerar query' }}
+            </UButton>
+          </div>
+        </template>
+
+        <div class="space-y-5">
+          <UAlert
+            v-if="queryError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :description="queryError"
+          />
+
+          <div
+            v-if="!analysis?.canMoveForward"
+            class="py-8 text-center text-sm text-muted"
+          >
+            Aprove a analise da vaga antes de gerar uma query de sourcing.
+          </div>
+
+          <div
+            v-else-if="!sourcingQuery?.draft"
+            class="py-8 text-center text-sm text-muted"
+          >
+            Gere uma query inicial a partir da analise aprovada.
+          </div>
+
+          <div
+            v-else
+            class="space-y-4"
+          >
+            <UFormField label="Query provider-neutral">
+              <UTextarea
+                v-model="queryForm.queryText"
+                autoresize
+                :rows="4"
+              />
+            </UFormField>
+
+            <UFormField label="Filtros de provedor">
+              <UTextarea
+                v-model="queryForm.providerFiltersText"
+                autoresize
+                :rows="3"
+                placeholder="linkedin: Brazil, Head\napify: people search"
+              />
+            </UFormField>
+
+            <div class="grid gap-3 md:grid-cols-3">
+              <div class="rounded-lg border border-default p-3">
+                <span class="text-xs font-medium uppercase text-muted">Explicacao</span>
+                <p class="mt-2 text-sm text-toned">
+                  {{ sourcingQuery.draft.explanation }}
+                </p>
+              </div>
+              <div class="rounded-lg border border-default p-3">
+                <span class="text-xs font-medium uppercase text-muted">Assumptions</span>
+                <ul class="mt-2 space-y-1 text-sm text-toned">
+                  <li
+                    v-for="assumption in sourcingQuery.draft.assumptions"
+                    :key="assumption"
+                  >
+                    {{ assumption }}
+                  </li>
+                </ul>
+              </div>
+              <div class="rounded-lg border border-default p-3">
+                <span class="text-xs font-medium uppercase text-muted">Limites</span>
+                <ul class="mt-2 space-y-1 text-sm text-toned">
+                  <li
+                    v-for="limitation in sourcingQuery.draft.limitations"
+                    :key="limitation"
+                  >
+                    {{ limitation }}
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-3 border-t border-default pt-4">
+              <p class="text-sm text-muted">
+                Queries aprovadas ficam versionadas e podem ser usadas por rodadas futuras.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <UButton
+                  icon="i-lucide-save"
+                  color="neutral"
+                  variant="subtle"
+                  :loading="busy"
+                  @click="saveSourcingQuery"
+                >
+                  Salvar query
+                </UButton>
+                <UButton
+                  icon="i-lucide-check"
+                  color="success"
+                  :loading="busy"
+                  :disabled="!queryForm.queryText.trim()"
+                  @click="approveSourcingQuery"
+                >
+                  Aprovar query
+                </UButton>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="sourcingQuery?.approvedVersions.length"
+            class="space-y-3 border-t border-default pt-4"
+          >
+            <h2 class="text-sm font-semibold text-highlighted">
+              Versoes aprovadas
+            </h2>
+            <div
+              v-for="version in sourcingQuery.approvedVersions"
+              :key="version.id"
+              class="rounded-lg border border-default p-3"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <UBadge
+                  color="success"
+                  variant="subtle"
+                >
+                  Versao {{ version.versionNumber }}
+                </UBadge>
+                <UBadge
+                  color="primary"
+                  variant="subtle"
+                >
+                  Selecionavel para rodada
+                </UBadge>
+              </div>
+              <pre class="mt-3 whitespace-pre-wrap text-sm text-toned"><code>{{ version.queryText }}</code></pre>
+            </div>
+          </div>
+        </div>
+      </UCard>
       <UCard>
         <template #header>
           <div class="flex flex-wrap items-center justify-between gap-3">
