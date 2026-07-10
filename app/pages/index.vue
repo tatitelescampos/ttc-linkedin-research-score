@@ -17,6 +17,7 @@ type PdfExtractionResult = {
   sizeBytes: number
   extractedText: string
   characterCount: number
+  extractionMethod: 'digital' | 'ocr'
 }
 
 const emptyForm = () => ({
@@ -138,7 +139,7 @@ const createVacancy = async () => {
             Criar e navegar vagas
           </h1>
           <p class="mt-3 text-sm leading-6 text-muted">
-            Cole uma descricao ou importe um PDF digital, revise o texto e preserve a primeira versao para analise e sourcing futuros.
+            Cole uma descricao ou importe um PDF. PDFs escaneados passam por OCR local para voce revisar antes de salvar.
           </p>
         </div>
 
@@ -176,9 +177,9 @@ const createVacancy = async () => {
               class="space-y-4 rounded-lg border border-default p-4"
             >
               <UFormField
-                label="PDF digital da vaga"
+                label="PDF da vaga"
                 name="pdf"
-                help="Use PDFs digitais com texto selecionavel. PDFs escaneados entram no proximo slice de OCR."
+                help="PDFs digitais sao extraidos direto; PDFs escaneados usam OCR local e podem levar alguns instantes."
                 required
               >
                 <input
@@ -197,13 +198,21 @@ const createVacancy = async () => {
                   :disabled="!selectedPdf"
                   @click="extractPdf"
                 >
-                  Extrair texto
+                  Extrair texto / OCR
                 </UButton>
                 <span class="text-sm text-muted">
                   {{ selectedPdf?.name || 'Nenhum PDF selecionado' }}
                 </span>
               </div>
 
+              <UAlert
+                v-if="extractPending"
+                color="primary"
+                variant="subtle"
+                icon="i-lucide-loader-circle"
+                title="Extraindo texto"
+                description="Lendo o PDF. Se ele for escaneado, o OCR local sera iniciado automaticamente."
+              />
               <UAlert
                 v-if="extractionError"
                 color="error"
@@ -218,7 +227,7 @@ const createVacancy = async () => {
                 variant="subtle"
                 icon="i-lucide-check-circle"
                 title="Texto extraido para revisao"
-                :description="`${extractedPdf.characterCount} caracteres extraidos de ${extractedPdf.filename}.`"
+                :description="`${extractedPdf.characterCount} caracteres extraidos de ${extractedPdf.filename} via ${extractedPdf.extractionMethod === 'ocr' ? 'OCR local' : 'texto digital'}. Revise e corrija o texto abaixo antes de salvar.`"
               />
             </div>
 

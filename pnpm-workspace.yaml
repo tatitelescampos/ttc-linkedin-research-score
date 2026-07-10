@@ -2,5 +2,6 @@ allowBuilds:
   '@parcel/watcher': false
   '@tailwindcss/oxide': false
   esbuild: false
+  tesseract.js: false
   unrs-resolver: false
   vue-demi: false
