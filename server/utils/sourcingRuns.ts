@@ -15,6 +15,7 @@ type RunInput = {
   batchSize?: unknown
   cacheAgeDays?: unknown
   mode?: unknown
+  confirmLive?: unknown
 }
 
 export type SourcingRunDetail = {
@@ -22,7 +23,7 @@ export type SourcingRunDetail = {
   vacancyId: number
   sourcingQueryId: number
   status: 'queued' | 'running' | 'completed' | 'failed'
-  mode: 'mock'
+  mode: 'mock' | 'apify'
   config: {
     desiredResults: number
     threshold: number
@@ -35,6 +36,10 @@ export type SourcingRunDetail = {
   foundCount: number
   savedCount: number
   errorMessage: string | null
+  providerStatus: string | null
+  returnedCount: number
+  rawResponse: unknown
+  normalizedResponse: unknown
   startedAt: string | null
   completedAt: string | null
   createdAt: string
@@ -96,7 +101,7 @@ const serializeRun = (run: typeof sourcingRuns.$inferSelect, query: typeof sourc
   vacancyId: run.vacancyId,
   sourcingQueryId: run.sourcingQueryId,
   status: ['queued', 'running', 'completed', 'failed'].includes(run.status) ? run.status as SourcingRunDetail['status'] : 'failed',
-  mode: 'mock',
+  mode: run.mode === 'apify' ? 'apify' : 'mock',
   config: {
     desiredResults: run.desiredResults,
     threshold: run.threshold,
@@ -109,6 +114,10 @@ const serializeRun = (run: typeof sourcingRuns.$inferSelect, query: typeof sourc
   foundCount: run.foundCount,
   savedCount: run.savedCount,
   errorMessage: run.errorMessage,
+  providerStatus: run.providerStatus,
+  returnedCount: run.returnedCount,
+  rawResponse: run.rawResponseJson ? JSON.parse(run.rawResponseJson) : null,
+  normalizedResponse: run.normalizedResponseJson ? JSON.parse(run.normalizedResponseJson) : null,
   startedAt: run.startedAt,
   completedAt: run.completedAt,
   createdAt: run.createdAt,
@@ -175,6 +184,69 @@ export const getSourcingRuns = async (vacancyId: number, database: Database = de
   return details
 }
 
+type ApifySourcingClient = {
+  run: (input: { queryText: string, maxItems: number, takePages: number }) => Promise<{ status: string, rawItems: unknown[] }>
+}
+
+const normalizeApifyProfile = (item: unknown, index: number) => {
+  const value = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+  const firstName = typeof value.firstName === 'string' ? value.firstName : ''
+  const lastName = typeof value.lastName === 'string' ? value.lastName : ''
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || (typeof value.fullName === 'string' ? value.fullName : `Apify Profile ${index + 1}`)
+  const location = value.location && typeof value.location === 'object' ? value.location as Record<string, unknown> : {}
+  const parsedLocation = location.parsed && typeof location.parsed === 'object' ? location.parsed as Record<string, unknown> : {}
+  const currentPositions = Array.isArray(value.currentPosition) ? value.currentPosition : []
+
+  return {
+    provider: 'apify',
+    providerId: value.id ?? value.publicIdentifier ?? null,
+    linkedinUrl: value.linkedinUrl ?? (value.publicIdentifier ? `https://www.linkedin.com/in/${value.publicIdentifier}` : null),
+    publicIdentifier: value.publicIdentifier ?? null,
+    fullName,
+    headline: value.headline ?? '',
+    location: location.linkedinText ?? [parsedLocation.city, parsedLocation.state, parsedLocation.countryCode].filter(Boolean).join(', '),
+    about: value.about ?? '',
+    currentPositions: currentPositions.map(position => ({
+      title: (position && typeof position === 'object' && 'position' in position ? position.position : '') ?? '',
+      companyName: (position && typeof position === 'object' && 'companyName' in position ? position.companyName : '') ?? '',
+      duration: (position && typeof position === 'object' && 'duration' in position ? position.duration : '') ?? '',
+      description: (position && typeof position === 'object' && 'description' in position ? position.description : '') ?? ''
+    }))
+  }
+}
+
+export const createApifySourcingClient = (token = process.env.NUXT_APIFY_TOKEN || process.env.APIFY_TOKEN): ApifySourcingClient => ({
+  async run(input) {
+    if (!token) {
+      throw new VacancyValidationError('Configure NUXT_APIFY_TOKEN para rodadas live Apify.', 400)
+    }
+
+    const actorPath = encodeURIComponent('harvestapi/linkedin-profile-search').replace('%2F', '~')
+    const url = new URL(`https://api.apify.com/v2/acts/${actorPath}/run-sync-get-dataset-items`)
+    url.searchParams.set('token', token)
+    url.searchParams.set('timeout', '60')
+    url.searchParams.set('memory', '256')
+    url.searchParams.set('clean', 'true')
+    url.searchParams.set('format', 'json')
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        profileScraperMode: 'Full',
+        searchQuery: input.queryText,
+        startPage: 1,
+        takePages: input.takePages,
+        maxItems: input.maxItems
+      })
+    })
+    const payload = await response.json().catch(() => [])
+    if (!response.ok) {
+      throw new VacancyValidationError('A Apify retornou erro na rodada live.', response.status)
+    }
+    return { status: String(response.status), rawItems: Array.isArray(payload) ? payload : [] }
+  }
+})
 export const runMockSourcing = async (vacancyId: number, input: RunInput, database: Database = defaultDb) => {
   const queryId = parseInteger(input.queryId, 'Query aprovada', 1, Number.MAX_SAFE_INTEGER)
   const config = parseConfig(input)
@@ -226,6 +298,74 @@ export const runMockSourcing = async (vacancyId: number, input: RunInput, databa
   const completed = runs.find(item => item.id === run.id)
   if (!completed) {
     throw new Error('Nao foi possivel carregar a rodada concluida.')
+  }
+  return completed
+}
+
+export const runApifySourcing = async (vacancyId: number, input: RunInput, database: Database = defaultDb, client: ApifySourcingClient = createApifySourcingClient()) => {
+  const queryId = parseInteger(input.queryId, 'Query aprovada', 1, Number.MAX_SAFE_INTEGER)
+  const config = parseConfig({ ...input, mode: 'mock' })
+  if (input.confirmLive !== true) {
+    throw new VacancyValidationError('Confirme explicitamente os limites antes de rodar Apify live.', 409)
+  }
+  await assertApprovedSourcingQuery(vacancyId, queryId, database)
+
+  const [query] = await database.select().from(sourcingQueries)
+    .where(and(eq(sourcingQueries.id, queryId), eq(sourcingQueries.vacancyId, vacancyId)))
+    .limit(1)
+  if (!query) {
+    throw new VacancyValidationError('Query aprovada nao encontrada.', 404)
+  }
+
+  const [run] = await database.insert(sourcingRuns).values({
+    vacancyId,
+    sourcingQueryId: queryId,
+    status: 'running',
+    mode: 'apify',
+    desiredResults: config.desiredResults,
+    threshold: config.threshold,
+    profileLimit: config.profileLimit,
+    pageLimit: config.pageLimit,
+    batchSize: config.batchSize,
+    cacheAgeDays: config.cacheAgeDays,
+    progress: 10,
+    startedAt: sql`CURRENT_TIMESTAMP`,
+    updatedAt: sql`CURRENT_TIMESTAMP`
+  }).returning()
+  if (!run) {
+    throw new Error('Nao foi possivel iniciar a rodada Apify.')
+  }
+
+  try {
+    const response = await client.run({ queryText: query.queryText, maxItems: config.profileLimit, takePages: config.pageLimit })
+    const normalized = response.rawItems.map(normalizeApifyProfile)
+    await database.update(sourcingRuns).set({
+      status: 'completed',
+      progress: 100,
+      providerStatus: response.status,
+      returnedCount: response.rawItems.length,
+      foundCount: response.rawItems.length,
+      savedCount: normalized.length,
+      rawResponseJson: JSON.stringify(response.rawItems),
+      normalizedResponseJson: JSON.stringify(normalized),
+      completedAt: sql`CURRENT_TIMESTAMP`,
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    }).where(eq(sourcingRuns.id, run.id))
+  } catch (error) {
+    await database.update(sourcingRuns).set({
+      status: 'failed',
+      progress: 100,
+      errorMessage: error instanceof Error ? error.message : 'Falha ao chamar Apify.',
+      completedAt: sql`CURRENT_TIMESTAMP`,
+      updatedAt: sql`CURRENT_TIMESTAMP`
+    }).where(eq(sourcingRuns.id, run.id))
+    throw error
+  }
+
+  const runs = await getSourcingRuns(vacancyId, database)
+  const completed = runs.find(item => item.id === run.id)
+  if (!completed) {
+    throw new Error('Nao foi possivel carregar a rodada Apify concluida.')
   }
   return completed
 }

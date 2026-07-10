@@ -67,7 +67,11 @@ type SourcingRun = {
   vacancyId: number
   sourcingQueryId: number
   status: 'queued' | 'running' | 'completed' | 'failed'
-  mode: 'mock'
+  mode: 'mock' | 'apify'
+  providerStatus: string | null
+  returnedCount: number
+  rawResponse: unknown
+  normalizedResponse: unknown
   config: {
     desiredResults: number
     threshold: number
@@ -135,7 +139,8 @@ const runForm = reactive({
   pageLimit: 2,
   batchSize: 5,
   cacheAgeDays: 14,
-  mode: 'mock' as const
+  mode: 'mock' as 'mock' | 'apify',
+  confirmLive: false
 })
 
 const form = reactive({
@@ -296,7 +301,7 @@ const approveSourcingQuery = async () => {
     busy.value = false
   }
 }
-const runMockSourcing = async () => {
+const runSourcing = async () => {
   busy.value = true
   runError.value = ''
 
@@ -309,9 +314,9 @@ const runMockSourcing = async () => {
     if (!sourcingRuns.value?.some(item => item.id === run.id)) {
       sourcingRuns.value = [run, ...(sourcingRuns.value ?? [])]
     }
-    toast.add({ title: 'Rodada mock concluida', color: 'success' })
+    toast.add({ title: runForm.mode === 'apify' ? 'Rodada Apify concluida' : 'Rodada mock concluida', color: 'success' })
   } catch (err) {
-    runError.value = err instanceof Error ? err.message : 'Nao foi possivel rodar o mock.'
+    runError.value = err instanceof Error ? err.message : 'Nao foi possivel rodar a rodada.'
     await refreshSourcingRuns()
   } finally {
     busy.value = false
@@ -804,7 +809,7 @@ const approveAnalysis = async () => {
         <template #header>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-semibold text-highlighted">Rodada mock de sourcing</span>
+              <span class="text-sm font-semibold text-highlighted">Rodada de sourcing</span>
               <UBadge
                 color="neutral"
                 variant="subtle"
@@ -817,9 +822,9 @@ const approveAnalysis = async () => {
               color="primary"
               :loading="busy"
               :disabled="!runForm.queryId"
-              @click="runMockSourcing"
+              @click="runSourcing"
             >
-              Rodar mock
+              {{ runForm.mode === 'apify' ? 'Rodar Apify' : 'Rodar mock' }}
             </UButton>
           </div>
         </template>
@@ -837,7 +842,7 @@ const approveAnalysis = async () => {
             v-if="!sourcingQuery?.approvedVersions.length"
             class="py-8 text-center text-sm text-muted"
           >
-            Aprove uma versao da query antes de iniciar uma rodada mock.
+            Aprove uma versao da query antes de iniciar uma rodada.
           </div>
 
           <div
@@ -952,7 +957,19 @@ const approveAnalysis = async () => {
                 <span class="text-muted">Threshold: {{ run.config.threshold }}</span>
                 <span class="text-muted">Limites: {{ run.config.profileLimit }} perfis, {{ run.config.pageLimit }} paginas, lote {{ run.config.batchSize }}</span>
               </div>
-              <div class="mt-4 space-y-2">
+              <div
+                v-if="run.mode === 'apify'"
+                class="mt-3 grid gap-3 md:grid-cols-2"
+              >
+                <div class="rounded-lg border border-default p-3">
+                  <span class="text-xs font-medium uppercase text-muted">Raw Apify</span>
+                  <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-xs text-toned"><code>{{ JSON.stringify(run.rawResponse, null, 2) }}</code></pre>
+                </div>
+                <div class="rounded-lg border border-default p-3">
+                  <span class="text-xs font-medium uppercase text-muted">Normalizado</span>
+                  <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-xs text-toned"><code>{{ JSON.stringify(run.normalizedResponse, null, 2) }}</code></pre>
+                </div>
+              </div>              <div class="mt-4 space-y-2">
                 <div
                   v-for="result in run.results"
                   :key="result.id"
