@@ -61,6 +61,43 @@ type SourcingQueryPlan = {
   draft: SourcingQuery | null
   approvedVersions: SourcingQuery[]
 }
+
+type SourcingRun = {
+  id: number
+  vacancyId: number
+  sourcingQueryId: number
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  mode: 'mock'
+  config: {
+    desiredResults: number
+    threshold: number
+    profileLimit: number
+    pageLimit: number
+    batchSize: number
+    cacheAgeDays: number
+  }
+  progress: number
+  foundCount: number
+  savedCount: number
+  errorMessage: string | null
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+  query: { id: number, versionNumber: number | null, queryText: string }
+  results: Array<{
+    id: number
+    rank: number
+    profileUrl: string
+    fullName: string
+    headline: string
+    location: string
+    score: number
+    matchedTerms: string[]
+    summary: string
+    createdAt: string
+  }>
+}
 type VacancyAnalysis = {
   id: number
   vacancyId: number
@@ -83,10 +120,22 @@ const vacancyId = computed(() => Number(route.params.id))
 const { data: vacancy, pending, error } = await useFetch<VacancyDetail>(`/api/vacancies/${route.params.id}`)
 const { data: analysis, refresh: refreshAnalysis } = await useFetch<VacancyAnalysis | null>(`/api/vacancies/${route.params.id}/analysis`)
 const { data: sourcingQuery, refresh: refreshSourcingQuery } = await useFetch<SourcingQueryPlan>(`/api/vacancies/${route.params.id}/sourcing-query`)
+const { data: sourcingRuns, refresh: refreshSourcingRuns } = await useFetch<SourcingRun[]>(`/api/vacancies/${route.params.id}/sourcing-runs`)
 
 const queryForm = reactive({
   queryText: '',
   providerFiltersText: ''
+})
+
+const runForm = reactive({
+  queryId: undefined as number | undefined,
+  desiredResults: 5,
+  threshold: 70,
+  profileLimit: 25,
+  pageLimit: 2,
+  batchSize: 5,
+  cacheAgeDays: 14,
+  mode: 'mock' as const
 })
 
 const form = reactive({
@@ -99,6 +148,7 @@ const form = reactive({
 const busy = ref(false)
 const saveError = ref('')
 const queryError = ref('')
+const runError = ref('')
 
 const splitLines = (value: string) => value.split('\n').map(item => item.trim()).filter(Boolean)
 const joinLines = (value: string[]) => value.join('\n')
@@ -128,6 +178,11 @@ const loadQueryForm = (value: SourcingQueryPlan | null | undefined) => {
 }
 
 watch(sourcingQuery, value => loadQueryForm(value), { immediate: true })
+watch(sourcingQuery, (value) => {
+  if (!runForm.queryId && value?.approvedVersions[0]) {
+    runForm.queryId = value.approvedVersions[0].id
+  }
+}, { immediate: true })
 
 const generateAnalysis = async (mode: 'mock' | 'openrouter' = 'mock') => {
   busy.value = true
@@ -237,6 +292,27 @@ const approveSourcingQuery = async () => {
     toast.add({ title: 'Query aprovada', color: 'success' })
   } catch (err) {
     queryError.value = err instanceof Error ? err.message : 'Nao foi possivel aprovar a query.'
+  } finally {
+    busy.value = false
+  }
+}
+const runMockSourcing = async () => {
+  busy.value = true
+  runError.value = ''
+
+  try {
+    const run = await $fetch<SourcingRun>(`/api/vacancies/${vacancyId.value}/sourcing-runs`, {
+      method: 'POST',
+      body: { ...runForm }
+    })
+    await refreshSourcingRuns()
+    if (!sourcingRuns.value?.some(item => item.id === run.id)) {
+      sourcingRuns.value = [run, ...(sourcingRuns.value ?? [])]
+    }
+    toast.add({ title: 'Rodada mock concluida', color: 'success' })
+  } catch (err) {
+    runError.value = err instanceof Error ? err.message : 'Nao foi possivel rodar o mock.'
+    await refreshSourcingRuns()
   } finally {
     busy.value = false
   }
@@ -720,6 +796,199 @@ const approveAnalysis = async () => {
                 </UBadge>
               </div>
               <pre class="mt-3 whitespace-pre-wrap text-sm text-toned"><code>{{ version.queryText }}</code></pre>
+            </div>
+          </div>
+        </div>
+      </UCard>
+      <UCard>
+        <template #header>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-semibold text-highlighted">Rodada mock de sourcing</span>
+              <UBadge
+                color="neutral"
+                variant="subtle"
+              >
+                Sem credenciais externas
+              </UBadge>
+            </div>
+            <UButton
+              icon="i-lucide-play"
+              color="primary"
+              :loading="busy"
+              :disabled="!runForm.queryId"
+              @click="runMockSourcing"
+            >
+              Rodar mock
+            </UButton>
+          </div>
+        </template>
+
+        <div class="space-y-5">
+          <UAlert
+            v-if="runError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :description="runError"
+          />
+
+          <div
+            v-if="!sourcingQuery?.approvedVersions.length"
+            class="py-8 text-center text-sm text-muted"
+          >
+            Aprove uma versao da query antes de iniciar uma rodada mock.
+          </div>
+
+          <div
+            v-else
+            class="space-y-4"
+          >
+            <div class="grid gap-3 md:grid-cols-4 lg:grid-cols-7">
+              <UFormField
+                label="Query aprovada"
+                class="md:col-span-2"
+              >
+                <USelect
+                  v-model="runForm.queryId"
+                  :items="sourcingQuery.approvedVersions.map(version => ({ label: `Versao ${version.versionNumber}`, value: version.id }))"
+                />
+              </UFormField>
+              <UFormField label="Resultados">
+                <UInput
+                  v-model.number="runForm.desiredResults"
+                  type="number"
+                  min="1"
+                  max="50"
+                />
+              </UFormField>
+              <UFormField label="Threshold">
+                <UInput
+                  v-model.number="runForm.threshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                />
+              </UFormField>
+              <UFormField label="Perfis">
+                <UInput
+                  v-model.number="runForm.profileLimit"
+                  type="number"
+                  min="1"
+                  max="500"
+                />
+              </UFormField>
+              <UFormField label="Paginas">
+                <UInput
+                  v-model.number="runForm.pageLimit"
+                  type="number"
+                  min="1"
+                  max="50"
+                />
+              </UFormField>
+              <UFormField label="Lote">
+                <UInput
+                  v-model.number="runForm.batchSize"
+                  type="number"
+                  min="1"
+                  max="100"
+                />
+              </UFormField>
+            </div>
+            <div class="grid gap-3 md:grid-cols-4">
+              <UFormField label="Cache maximo (dias)">
+                <UInput
+                  v-model.number="runForm.cacheAgeDays"
+                  type="number"
+                  min="0"
+                  max="365"
+                />
+              </UFormField>
+              <UFormField label="Modo">
+                <UInput
+                  v-model="runForm.mode"
+                  disabled
+                />
+              </UFormField>
+            </div>
+          </div>
+
+          <div
+            v-if="sourcingRuns?.length"
+            class="space-y-3 border-t border-default pt-4"
+          >
+            <h2 class="text-sm font-semibold text-highlighted">
+              Rodadas salvas
+            </h2>
+            <div
+              v-for="run in sourcingRuns"
+              :key="run.id"
+              class="rounded-lg border border-default p-3"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <UBadge
+                    color="success"
+                    variant="subtle"
+                  >
+                    {{ run.status === 'completed' ? 'Concluida' : run.status }}
+                  </UBadge>
+                  <UBadge
+                    color="primary"
+                    variant="subtle"
+                  >
+                    Query v{{ run.query.versionNumber }}
+                  </UBadge>
+                  <span class="text-sm text-muted">{{ run.savedCount }} salvos de {{ run.foundCount }} encontrados</span>
+                </div>
+                <span class="text-sm font-medium text-highlighted">{{ run.progress }}%</span>
+              </div>
+              <UProgress
+                :model-value="run.progress"
+                class="mt-3"
+              />
+              <div class="mt-3 grid gap-2 text-sm md:grid-cols-3">
+                <span class="text-muted">Resultados: {{ run.config.desiredResults }}</span>
+                <span class="text-muted">Threshold: {{ run.config.threshold }}</span>
+                <span class="text-muted">Limites: {{ run.config.profileLimit }} perfis, {{ run.config.pageLimit }} paginas, lote {{ run.config.batchSize }}</span>
+              </div>
+              <div class="mt-4 space-y-2">
+                <div
+                  v-for="result in run.results"
+                  :key="result.id"
+                  class="rounded-md border border-default p-3"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p class="text-sm font-semibold text-highlighted">
+                        #{{ result.rank }} {{ result.fullName }}
+                      </p>
+                      <p class="text-sm text-toned">
+                        {{ result.headline }} - {{ result.location }}
+                      </p>
+                    </div>
+                    <UBadge
+                      color="success"
+                      variant="subtle"
+                    >
+                      {{ result.score }}
+                    </UBadge>
+                  </div>
+                  <p class="mt-2 text-sm text-muted">
+                    {{ result.summary }}
+                  </p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <UBadge
+                      v-for="term in result.matchedTerms"
+                      :key="term"
+                      color="neutral"
+                      variant="subtle"
+                    >
+                      {{ term }}
+                    </UBadge>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

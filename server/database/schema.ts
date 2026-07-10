@@ -91,3 +91,38 @@ export const sourcingQueries = sqliteTable('sourcing_queries', {
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
 })
+export const sourcingRuns = sqliteTable('sourcing_runs', {
+  id: int().primaryKey({ autoIncrement: true }),
+  vacancyId: int('vacancy_id').notNull().references(() => vacancies.id),
+  sourcingQueryId: int('sourcing_query_id').notNull().references(() => sourcingQueries.id),
+  status: text().notNull().default('queued'),
+  mode: text().notNull().default('mock'),
+  desiredResults: int('desired_results').notNull(),
+  threshold: int().notNull(),
+  profileLimit: int('profile_limit').notNull(),
+  pageLimit: int('page_limit').notNull(),
+  batchSize: int('batch_size').notNull(),
+  cacheAgeDays: int('cache_age_days').notNull(),
+  progress: int().notNull().default(0),
+  foundCount: int('found_count').notNull().default(0),
+  savedCount: int('saved_count').notNull().default(0),
+  errorMessage: text('error_message'),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})
+
+export const sourcingRunResults = sqliteTable('sourcing_run_results', {
+  id: int().primaryKey({ autoIncrement: true }),
+  runId: int('run_id').notNull().references(() => sourcingRuns.id),
+  rank: int().notNull(),
+  profileUrl: text('profile_url').notNull(),
+  fullName: text('full_name').notNull(),
+  headline: text().notNull(),
+  location: text().notNull(),
+  score: int().notNull(),
+  matchedTermsJson: text('matched_terms_json').notNull().default('[]'),
+  summary: text().notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})
