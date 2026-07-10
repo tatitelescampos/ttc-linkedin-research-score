@@ -130,3 +130,39 @@ export const sourcingRunResults = sqliteTable('sourcing_run_results', {
   summary: text().notNull(),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
 })
+
+export const providerProfiles = sqliteTable('provider_profiles', {
+  id: int().primaryKey({ autoIncrement: true }),
+  provider: text().notNull(),
+  providerId: text('provider_id'),
+  linkedinUrl: text('linkedin_url'),
+  publicIdentifier: text('public_identifier'),
+  fullName: text('full_name').notNull(),
+  headline: text(),
+  location: text(),
+  cacheStatus: text('cache_status').notNull().default('fresh'),
+  lastSeenAt: text('last_seen_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+}, table => [
+  uniqueIndex('provider_profiles_provider_id_unique').on(table.provider, table.providerId),
+  uniqueIndex('provider_profiles_linkedin_url_unique').on(table.linkedinUrl),
+  uniqueIndex('provider_profiles_public_identifier_unique').on(table.publicIdentifier)
+])
+
+export const providerProfileVersions = sqliteTable('provider_profile_versions', {
+  id: int().primaryKey({ autoIncrement: true }),
+  profileId: int('profile_id').notNull().references(() => providerProfiles.id),
+  sourceRunId: int('source_run_id').references(() => sourcingRuns.id),
+  rawJson: text('raw_json').notNull(),
+  normalizedJson: text('normalized_json').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})
+
+export const providerProfileIdentityReviews = sqliteTable('provider_profile_identity_reviews', {
+  id: int().primaryKey({ autoIncrement: true }),
+  sourceRunId: int('source_run_id').references(() => sourcingRuns.id),
+  reason: text().notNull(),
+  candidateJson: text('candidate_json').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})

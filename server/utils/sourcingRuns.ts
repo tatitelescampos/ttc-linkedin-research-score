@@ -2,6 +2,7 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { sourcingQueries, sourcingRunResults, sourcingRuns, vacancies } from '../database/schema'
 import { db as defaultDb } from './db'
 import { assertApprovedSourcingQuery } from './sourcingQueries'
+import { ingestProviderProfiles } from './providerProfiles'
 import { VacancyValidationError } from './vacancies'
 
 type Database = typeof defaultDb
@@ -339,6 +340,7 @@ export const runApifySourcing = async (vacancyId: number, input: RunInput, datab
   try {
     const response = await client.run({ queryText: query.queryText, maxItems: config.profileLimit, takePages: config.pageLimit })
     const normalized = response.rawItems.map(normalizeApifyProfile)
+    await ingestProviderProfiles(normalized.map((profile, index) => ({ ...profile, raw: response.rawItems[index] })), run.id, database)
     await database.update(sourcingRuns).set({
       status: 'completed',
       progress: 100,
