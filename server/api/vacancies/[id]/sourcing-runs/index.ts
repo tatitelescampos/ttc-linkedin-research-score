@@ -1,4 +1,4 @@
-import { getSourcingRuns, runMockSourcing } from '../../../../utils/sourcingRuns'
+import { getSourcingRuns, runApifySourcing, runMockSourcing } from '../../../../utils/sourcingRuns'
 import { VacancyValidationError } from '../../../../utils/vacancies'
 
 export default defineEventHandler(async (event) => {
@@ -10,7 +10,8 @@ export default defineEventHandler(async (event) => {
     }
 
     if (event.method === 'POST') {
-      return await runMockSourcing(id, await readBody(event))
+      const body = await readBody(event)
+      return body?.mode === 'apify' ? await runApifySourcing(id, body) : await runMockSourcing(id, body)
     }
 
     throw createError({ statusCode: 405, statusMessage: 'Metodo nao permitido.' })
