@@ -111,7 +111,9 @@ export const sourcingRuns = sqliteTable('sourcing_runs', {
   foundCount: int('found_count').notNull().default(0),
   savedCount: int('saved_count').notNull().default(0),
   errorMessage: text('error_message'),
+  stopReason: text('stop_reason'),
   startedAt: text('started_at'),
+  stoppedAt: text('stopped_at'),
   completedAt: text('completed_at'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
@@ -166,3 +168,45 @@ export const providerProfileIdentityReviews = sqliteTable('provider_profile_iden
   candidateJson: text('candidate_json').notNull(),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
 })
+export const profileEvaluations = sqliteTable('profile_evaluations', {
+  id: int().primaryKey({ autoIncrement: true }),
+  vacancyId: int('vacancy_id').notNull().references(() => vacancies.id),
+  analysisId: int('analysis_id').notNull().references(() => vacancyAnalyses.id),
+  profileId: int('profile_id').notNull().references(() => providerProfiles.id),
+  suitabilityScore: int('suitability_score').notNull(),
+  confidence: int().notNull(),
+  category: text().notNull(),
+  isEliminated: int('is_eliminated', { mode: 'boolean' }).notNull().default(false),
+  eliminationReason: text('elimination_reason'),
+  missingInformationJson: text('missing_information_json').notNull().default('[]'),
+  explanation: text().notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+}, table => [
+  uniqueIndex('profile_evaluations_vacancy_profile_unique').on(table.vacancyId, table.profileId)
+])
+
+export const profileRequirementEvidence = sqliteTable('profile_requirement_evidence', {
+  id: int().primaryKey({ autoIncrement: true }),
+  evaluationId: int('evaluation_id').notNull().references(() => profileEvaluations.id),
+  requirementId: int('requirement_id').notNull().references(() => vacancyAnalysisRequirements.id),
+  status: text().notNull(),
+  scoreContribution: int('score_contribution').notNull().default(0),
+  confidence: int().notNull().default(0),
+  evidenceText: text('evidence_text'),
+  explanation: text().notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+})
+export const candidateDecisions = sqliteTable('candidate_decisions', {
+  id: int().primaryKey({ autoIncrement: true }),
+  vacancyId: int('vacancy_id').notNull().references(() => vacancies.id),
+  profileId: int('profile_id').notNull().references(() => providerProfiles.id),
+  evaluationId: int('evaluation_id').references(() => profileEvaluations.id),
+  decision: text().notNull().default('undecided'),
+  note: text(),
+  decidedAt: text('decided_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+}, table => [
+  uniqueIndex('candidate_decisions_vacancy_profile_unique').on(table.vacancyId, table.profileId)
+])

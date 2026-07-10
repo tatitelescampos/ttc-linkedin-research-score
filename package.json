@@ -14,7 +14,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "check": "pnpm run test && pnpm run lint && pnpm run typecheck",
+    "local:ship": "pnpm run db:migrate && pnpm run build"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.114",

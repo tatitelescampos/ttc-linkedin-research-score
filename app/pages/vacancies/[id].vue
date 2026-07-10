@@ -1,4 +1,11 @@
 <script setup lang="ts">
+type CostSummary = {
+  currency: 'USD'
+  totalUsd: string
+  analysisUsd: string
+  apifyEstimatedUsd: string
+  events: Array<{ source: string, status: string, amountUsd: string, createdAt: string }>
+}
 type VacancyVersion = {
   id: number
   versionNumber: number
@@ -66,7 +73,7 @@ type SourcingRun = {
   id: number
   vacancyId: number
   sourcingQueryId: number
-  status: 'queued' | 'running' | 'completed' | 'failed'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped'
   mode: 'mock' | 'apify'
   providerStatus: string | null
   returnedCount: number
@@ -84,7 +91,9 @@ type SourcingRun = {
   foundCount: number
   savedCount: number
   errorMessage: string | null
+  stopReason: string | null
   startedAt: string | null
+  stoppedAt: string | null
   completedAt: string | null
   createdAt: string
   updatedAt: string
@@ -100,6 +109,40 @@ type SourcingRun = {
     matchedTerms: string[]
     summary: string
     createdAt: string
+  }>
+}
+
+type ProfileEvaluation = {
+  id: number
+  vacancyId: number
+  analysisId: number
+  profileId: number
+  profileName: string
+  linkedinUrl: string | null
+  headline: string | null
+  location: string | null
+  suitabilityScore: number
+  confidence: number
+  category: 'strong' | 'possible' | 'weak' | 'eliminated'
+  isEliminated: boolean
+  eliminationReason: string | null
+  missingInformation: string[]
+  explanation: string
+  createdAt: string
+  updatedAt: string
+  decision: { id: number, decision: string, note: string | null, decidedAt: string | null } | null
+  evidence: Array<{
+    id: number
+    requirementId: number
+    requirementLabel: string
+    requirementCategory: string
+    weight: number
+    isEliminatory: boolean
+    status: 'met' | 'unknown' | 'not_met' | 'contradicted'
+    scoreContribution: number
+    confidence: number
+    evidenceText: string | null
+    explanation: string
   }>
 }
 type VacancyAnalysis = {
@@ -125,6 +168,8 @@ const { data: vacancy, pending, error } = await useFetch<VacancyDetail>(`/api/va
 const { data: analysis, refresh: refreshAnalysis } = await useFetch<VacancyAnalysis | null>(`/api/vacancies/${route.params.id}/analysis`)
 const { data: sourcingQuery, refresh: refreshSourcingQuery } = await useFetch<SourcingQueryPlan>(`/api/vacancies/${route.params.id}/sourcing-query`)
 const { data: sourcingRuns, refresh: refreshSourcingRuns } = await useFetch<SourcingRun[]>(`/api/vacancies/${route.params.id}/sourcing-runs`)
+const { data: costSummary, refresh: refreshCosts } = await useFetch<CostSummary>(`/api/vacancies/${route.params.id}/costs`)
+const { data: profileEvaluations, refresh: refreshProfileEvaluations } = await useFetch<ProfileEvaluation[]>(`/api/vacancies/${route.params.id}/profile-evaluations`)
 
 const queryForm = reactive({
   queryText: '',
@@ -154,6 +199,8 @@ const busy = ref(false)
 const saveError = ref('')
 const queryError = ref('')
 const runError = ref('')
+const scoringError = ref('')
+const decisionError = ref('')
 
 const splitLines = (value: string) => value.split('\n').map(item => item.trim()).filter(Boolean)
 const joinLines = (value: string[]) => value.join('\n')
@@ -301,6 +348,55 @@ const approveSourcingQuery = async () => {
     busy.value = false
   }
 }
+
+const decideCandidate = async (evaluation: ProfileEvaluation, decision: 'shortlisted' | 'rejected' | 'maybe') => {
+  busy.value = true
+  decisionError.value = ''
+
+  try {
+    const saved = await $fetch<ProfileEvaluation['decision']>(`/api/vacancies/${vacancyId.value}/profile-evaluations/${evaluation.id}/decision`, {
+      method: 'PUT',
+      body: { decision }
+    })
+    profileEvaluations.value = (profileEvaluations.value ?? []).map(item => item.id === evaluation.id ? { ...item, decision: saved } : item)
+    toast.add({ title: 'Decisao salva', color: 'success' })
+  } catch (err) {
+    decisionError.value = err instanceof Error ? err.message : 'Nao foi possivel salvar a decisao.'
+  } finally {
+    busy.value = false
+  }
+}
+const stopRun = async (run: SourcingRun) => {
+  busy.value = true
+  runError.value = ''
+
+  try {
+    const stopped = await $fetch<SourcingRun>(`/api/vacancies/${vacancyId.value}/sourcing-runs/${run.id}/stop`, {
+      method: 'POST',
+      body: { reason: 'Parada manual pelo recrutador.' }
+    })
+    sourcingRuns.value = (sourcingRuns.value ?? []).map(item => item.id === stopped.id ? stopped : item)
+    toast.add({ title: 'Rodada parada', color: 'success' })
+  } catch (err) {
+    runError.value = err instanceof Error ? err.message : 'Nao foi possivel parar a rodada.'
+  } finally {
+    busy.value = false
+  }
+}
+const scoreProfiles = async () => {
+  busy.value = true
+  scoringError.value = ''
+
+  try {
+    profileEvaluations.value = await $fetch<ProfileEvaluation[]>(`/api/vacancies/${vacancyId.value}/profile-evaluations`, { method: 'POST' })
+    toast.add({ title: 'Scores calculados', color: 'success' })
+  } catch (err) {
+    scoringError.value = err instanceof Error ? err.message : 'Nao foi possivel calcular os scores.'
+    await refreshProfileEvaluations()
+  } finally {
+    busy.value = false
+  }
+}
 const runSourcing = async () => {
   busy.value = true
   runError.value = ''
@@ -311,6 +407,7 @@ const runSourcing = async () => {
       body: { ...runForm }
     })
     await refreshSourcingRuns()
+    await refreshCosts()
     if (!sourcingRuns.value?.some(item => item.id === run.id)) {
       sourcingRuns.value = [run, ...(sourcingRuns.value ?? [])]
     }
@@ -318,6 +415,7 @@ const runSourcing = async () => {
   } catch (err) {
     runError.value = err instanceof Error ? err.message : 'Nao foi possivel rodar a rodada.'
     await refreshSourcingRuns()
+    await refreshCosts()
   } finally {
     busy.value = false
   }
@@ -417,6 +515,24 @@ const approveAnalysis = async () => {
         </div>
       </div>
 
+      <UCard v-if="costSummary">
+        <template #header>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <span class="text-sm font-semibold text-highlighted">Custos</span>
+            <UBadge
+              color="primary"
+              variant="subtle"
+            >
+              ${{ costSummary.totalUsd }} USD
+            </UBadge>
+          </div>
+        </template>
+        <div class="grid gap-3 text-sm md:grid-cols-3">
+          <span class="text-muted">Analise: ${{ costSummary.analysisUsd }}</span>
+          <span class="text-muted">Apify estimado: ${{ costSummary.apifyEstimatedUsd }}</span>
+          <span class="text-muted">Eventos: {{ costSummary.events.length }}</span>
+        </div>
+      </UCard>
       <UCard v-if="vacancy.sourcingComment">
         <template #header>
           <span class="text-sm font-semibold text-highlighted">Comentario de sourcing</span>
@@ -936,7 +1052,7 @@ const approveAnalysis = async () => {
                     color="success"
                     variant="subtle"
                   >
-                    {{ run.status === 'completed' ? 'Concluida' : run.status }}
+                    {{ run.status === 'completed' ? 'Concluida' : run.status === 'stopped' ? 'Parada' : run.status }}
                   </UBadge>
                   <UBadge
                     color="primary"
@@ -946,11 +1062,32 @@ const approveAnalysis = async () => {
                   </UBadge>
                   <span class="text-sm text-muted">{{ run.savedCount }} salvos de {{ run.foundCount }} encontrados</span>
                 </div>
-                <span class="text-sm font-medium text-highlighted">{{ run.progress }}%</span>
+                <div class="flex items-center gap-2">
+                  <UButton
+                    v-if="run.status === 'queued' || run.status === 'running'"
+                    size="xs"
+                    color="warning"
+                    variant="subtle"
+                    icon="i-lucide-square"
+                    :loading="busy"
+                    @click="stopRun(run)"
+                  >
+                    Parar
+                  </UButton>
+                  <span class="text-sm font-medium text-highlighted">{{ run.progress }}%</span>
+                </div>
               </div>
               <UProgress
                 :model-value="run.progress"
                 class="mt-3"
+              />
+              <UAlert
+                v-if="run.stopReason"
+                class="mt-3"
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-octagon-alert"
+                :description="run.stopReason"
               />
               <div class="mt-3 grid gap-2 text-sm md:grid-cols-3">
                 <span class="text-muted">Resultados: {{ run.config.desiredResults }}</span>
@@ -1005,6 +1142,200 @@ const approveAnalysis = async () => {
                     </UBadge>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </UCard>
+      <UCard>
+        <template #header>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-semibold text-highlighted">Scores de perfis</span>
+              <UBadge
+                color="neutral"
+                variant="subtle"
+              >
+                {{ profileEvaluations?.length ?? 0 }} avaliados
+              </UBadge>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <UButton
+                icon="i-lucide-download"
+                color="neutral"
+                variant="subtle"
+                :to="`/api/vacancies/${vacancyId}/exports/candidates`"
+                target="_blank"
+              >
+                Exportar CSV
+              </UButton>
+              <UButton
+                icon="i-lucide-calculator"
+                color="primary"
+                :loading="busy"
+                :disabled="!analysis?.canMoveForward"
+                @click="scoreProfiles"
+              >
+                Calcular scores
+              </UButton>
+            </div>
+          </div>
+        </template>
+
+        <div class="space-y-4">
+          <UAlert
+            v-if="scoringError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :description="scoringError"
+          />          <UAlert
+            v-if="decisionError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-circle-alert"
+            :description="decisionError"
+          />
+          <UAlert
+            v-if="!analysis?.canMoveForward"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-lock"
+            description="Aprove a analise da vaga antes de calcular scores."
+          />
+          <div
+            v-else-if="!profileEvaluations?.length"
+            class="py-8 text-center text-sm text-muted"
+          >
+            Rode o sourcing e calcule os scores para revisar evidencias por requisito.
+          </div>
+          <div
+            v-else
+            class="space-y-3"
+          >
+            <div
+              v-for="evaluation in profileEvaluations"
+              :key="evaluation.id"
+              class="rounded-lg border border-default p-3"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm font-semibold text-highlighted">
+                      {{ evaluation.profileName }}
+                    </p>
+                    <UBadge
+                      :color="evaluation.isEliminated ? 'error' : evaluation.category === 'strong' ? 'success' : 'primary'"
+                      variant="subtle"
+                    >
+                      {{ evaluation.category }}
+                    </UBadge>
+                  </div>
+                  <p class="text-sm text-toned">
+                    {{ evaluation.headline ?? '-' }} - {{ evaluation.location ?? '-' }}
+                  </p>
+                  <NuxtLink
+                    v-if="evaluation.linkedinUrl"
+                    :to="evaluation.linkedinUrl"
+                    target="_blank"
+                    class="text-sm text-primary underline-offset-4 hover:underline"
+                  >
+                    LinkedIn
+                  </NuxtLink>
+                </div>
+                <div class="flex gap-2 text-right">
+                  <div>
+                    <p class="text-xs uppercase text-muted">
+                      Score
+                    </p>
+                    <p class="text-lg font-semibold text-highlighted">
+                      {{ evaluation.suitabilityScore }}%
+                    </p>
+                  </div>
+                  <div>
+                    <p class="text-xs uppercase text-muted">
+                      Confianca
+                    </p>
+                    <p class="text-lg font-semibold text-highlighted">
+                      {{ evaluation.confidence }}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <p class="mt-3 text-sm text-muted">
+                {{ evaluation.explanation }}
+              </p>              <div class="mt-3 flex flex-wrap gap-2">
+                <UButton
+                  size="xs"
+                  color="success"
+                  variant="subtle"
+                  icon="i-lucide-check"
+                  :disabled="evaluation.decision?.decision === 'shortlisted'"
+                  @click="decideCandidate(evaluation, 'shortlisted')"
+                >
+                  Avancar
+                </UButton>
+                <UButton
+                  size="xs"
+                  color="primary"
+                  variant="subtle"
+                  icon="i-lucide-circle-help"
+                  :disabled="evaluation.decision?.decision === 'maybe'"
+                  @click="decideCandidate(evaluation, 'maybe')"
+                >
+                  Talvez
+                </UButton>
+                <UButton
+                  size="xs"
+                  color="error"
+                  variant="subtle"
+                  icon="i-lucide-x"
+                  :disabled="evaluation.decision?.decision === 'rejected'"
+                  @click="decideCandidate(evaluation, 'rejected')"
+                >
+                  Rejeitar
+                </UButton>
+              </div>
+              <UAlert
+                v-if="evaluation.eliminationReason"
+                class="mt-3"
+                color="error"
+                variant="subtle"
+                icon="i-lucide-circle-x"
+                :description="evaluation.eliminationReason"
+              />
+              <div
+                v-if="evaluation.missingInformation.length"
+                class="mt-3 flex flex-wrap gap-2"
+              >
+                <UBadge
+                  v-for="missing in evaluation.missingInformation"
+                  :key="missing"
+                  color="warning"
+                  variant="subtle"
+                >
+                  {{ missing }} desconhecido
+                </UBadge>
+              </div>
+              <div class="mt-3 space-y-2">
+                <details
+                  v-for="item in evaluation.evidence"
+                  :key="item.id"
+                  class="rounded-md border border-default p-3"
+                >
+                  <summary class="cursor-pointer text-sm font-medium text-highlighted">
+                    {{ item.requirementLabel }} - {{ item.status }} - peso {{ item.weight }}
+                  </summary>
+                  <p class="mt-2 text-sm text-muted">
+                    {{ item.explanation }}
+                  </p>
+                  <p
+                    v-if="item.evidenceText"
+                    class="mt-2 rounded-md bg-elevated p-2 text-sm text-toned"
+                  >
+                    {{ item.evidenceText }}
+                  </p>
+                </details>
               </div>
             </div>
           </div>

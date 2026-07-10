@@ -23,7 +23,7 @@ export type SourcingRunDetail = {
   id: number
   vacancyId: number
   sourcingQueryId: number
-  status: 'queued' | 'running' | 'completed' | 'failed'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'stopped'
   mode: 'mock' | 'apify'
   config: {
     desiredResults: number
@@ -37,11 +37,13 @@ export type SourcingRunDetail = {
   foundCount: number
   savedCount: number
   errorMessage: string | null
+  stopReason: string | null
   providerStatus: string | null
   returnedCount: number
   rawResponse: unknown
   normalizedResponse: unknown
   startedAt: string | null
+  stoppedAt: string | null
   completedAt: string | null
   createdAt: string
   updatedAt: string
@@ -101,7 +103,7 @@ const serializeRun = (run: typeof sourcingRuns.$inferSelect, query: typeof sourc
   id: run.id,
   vacancyId: run.vacancyId,
   sourcingQueryId: run.sourcingQueryId,
-  status: ['queued', 'running', 'completed', 'failed'].includes(run.status) ? run.status as SourcingRunDetail['status'] : 'failed',
+  status: ['queued', 'running', 'completed', 'failed', 'stopped'].includes(run.status) ? run.status as SourcingRunDetail['status'] : 'failed',
   mode: run.mode === 'apify' ? 'apify' : 'mock',
   config: {
     desiredResults: run.desiredResults,
@@ -115,11 +117,13 @@ const serializeRun = (run: typeof sourcingRuns.$inferSelect, query: typeof sourc
   foundCount: run.foundCount,
   savedCount: run.savedCount,
   errorMessage: run.errorMessage,
+  stopReason: run.stopReason,
   providerStatus: run.providerStatus,
   returnedCount: run.returnedCount,
   rawResponse: run.rawResponseJson ? JSON.parse(run.rawResponseJson) : null,
   normalizedResponse: run.normalizedResponseJson ? JSON.parse(run.normalizedResponseJson) : null,
   startedAt: run.startedAt,
+  stoppedAt: run.stoppedAt,
   completedAt: run.completedAt,
   createdAt: run.createdAt,
   updatedAt: run.updatedAt,
@@ -370,4 +374,37 @@ export const runApifySourcing = async (vacancyId: number, input: RunInput, datab
     throw new Error('Nao foi possivel carregar a rodada Apify concluida.')
   }
   return completed
+}
+export const stopSourcingRun = async (vacancyId: number, runId: number, reason: unknown, database: Database = defaultDb) => {
+  if (!Number.isInteger(vacancyId) || vacancyId < 1 || !Number.isInteger(runId) || runId < 1) {
+    throw new VacancyValidationError('Identificador da rodada invalido.')
+  }
+
+  const [run] = await database.select().from(sourcingRuns)
+    .where(and(eq(sourcingRuns.id, runId), eq(sourcingRuns.vacancyId, vacancyId)))
+    .limit(1)
+
+  if (!run) {
+    throw new VacancyValidationError('Rodada de sourcing nao encontrada.', 404)
+  }
+
+  if (run.status === 'completed' || run.status === 'failed' || run.status === 'stopped') {
+    return (await getSourcingRuns(vacancyId, database)).find(item => item.id === runId)
+  }
+
+  const stopReason = typeof reason === 'string' && reason.trim() ? reason.trim() : 'Parada manual pelo recrutador.'
+  await database.update(sourcingRuns).set({
+    status: 'stopped',
+    progress: Math.max(run.progress, 100),
+    stopReason,
+    stoppedAt: sql`CURRENT_TIMESTAMP`,
+    completedAt: sql`CURRENT_TIMESTAMP`,
+    updatedAt: sql`CURRENT_TIMESTAMP`
+  }).where(eq(sourcingRuns.id, runId))
+
+  const stopped = (await getSourcingRuns(vacancyId, database)).find(item => item.id === runId)
+  if (!stopped) {
+    throw new Error('Nao foi possivel carregar a rodada parada.')
+  }
+  return stopped
 }

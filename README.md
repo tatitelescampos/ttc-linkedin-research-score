@@ -1,64 +1,49 @@
-# Nuxt Starter Template
+# TTC LinkedIn Research Score
 
-[![Nuxt UI](https://img.shields.io/badge/Made%20with-Nuxt%20UI-00DC82?logo=nuxt&labelColor=020420)](https://ui.nuxt.com)
+Local-first recruiting research tool for turning a vacancy into sourcing queries, running LinkedIn provider searches, caching profiles, scoring candidates with inspectable evidence, recording recruiter decisions, exporting selected candidates, tracking costs, and backing up local data.
 
-Use this template to get started with [Nuxt UI](https://ui.nuxt.com) quickly.
+## Requirements
 
-- [Live demo](https://starter-template.nuxt.dev/)
-- [Documentation](https://ui.nuxt.com/docs/getting-started/installation/nuxt)
-
-<a href="https://starter-template.nuxt.dev/" target="_blank">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://ui.nuxt.com/assets/templates/nuxt/starter-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://ui.nuxt.com/assets/templates/nuxt/starter-light.png">
-    <img alt="Nuxt Starter Template" src="https://ui.nuxt.com/assets/templates/nuxt/starter-light.png" width="830" height="466">
-  </picture>
-</a>
-
-> The starter template for Vue is on https://github.com/nuxt-ui-templates/starter-vue.
-
-## Quick Start
-
-```bash [Terminal]
-npm create nuxt@latest -- -t ui
-```
-
-## Deploy your own
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-name=starter&repository-url=https%3A%2F%2Fgithub.com%2Fnuxt-ui-templates%2Fstarter&demo-image=https%3A%2F%2Fui.nuxt.com%2Fassets%2Ftemplates%2Fnuxt%2Fstarter-dark.png&demo-url=https%3A%2F%2Fstarter-template.nuxt.dev%2F&demo-title=Nuxt%20Starter%20Template&demo-description=A%20minimal%20template%20to%20get%20started%20with%20Nuxt%20UI.)
+- Node.js compatible with the checked-in lockfile
+- pnpm 11
+- Local SQLite/libSQL database, defaulting to `.data/app.sqlite`
 
 ## Setup
 
-Make sure to install the dependencies:
-
 ```bash
 pnpm install
+pnpm run db:migrate
+pnpm run dev
 ```
 
-## Development Server
+The app runs at `http://localhost:3000` by default.
 
-Start the development server on `http://localhost:3000`:
+## Environment
+
+Copy `.env.example` to `.env` when needed.
+
+- `NUXT_DATABASE_URL`: defaults to `file:.data/app.sqlite`
+- `OPENROUTER_API_KEY`: enables live vacancy analysis
+- `NUXT_APIFY_TOKEN` or `APIFY_TOKEN`: enables live Apify sourcing
+
+## Local Operations
 
 ```bash
-pnpm dev
+pnpm run check
+pnpm run local:ship
 ```
 
-## Production
+Backups are available through:
 
-Build the application for production:
+- `GET /api/admin/backup` to download a JSON backup
+- `POST /api/admin/backup` with a backup JSON body to restore local data
 
-```bash
-pnpm build
-```
+## Product Flow
 
-Locally preview production build:
-
-```bash
-pnpm preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
-
-## Renovate integration
-
-Install [Renovate GitHub app](https://github.com/apps/renovate/installations/select_target) on your repository and you are good to go.
+1. Create a vacancy from pasted text or PDF.
+2. Generate and approve the vacancy analysis.
+3. Generate and approve sourcing queries.
+4. Run mock or Apify sourcing.
+5. Calculate deterministic profile scores.
+6. Review evidence and make recruiter decisions.
+7. Export shortlisted candidates as CSV.
